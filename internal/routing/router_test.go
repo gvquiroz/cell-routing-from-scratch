@@ -5,21 +5,21 @@ import (
 )
 
 func TestRouter_Route(t *testing.T) {
-	customerToPlacement := map[string]string{
+	routingTable := map[string]string{
 		"acme":    "tier1",
 		"globex":  "tier2",
 		"initech": "tier3",
 		"visa":    "visa",
 	}
 
-	placementToEndpoint := map[string]string{
+	cellEndpoints := map[string]string{
 		"tier1": "http://cell-tier1:9001",
 		"tier2": "http://cell-tier2:9002",
 		"tier3": "http://cell-tier3:9003",
 		"visa":  "http://cell-visa:9004",
 	}
 
-	router := NewRouter(customerToPlacement, placementToEndpoint, "tier3")
+	router := NewRouter(routingTable, cellEndpoints, "tier3")
 
 	tests := []struct {
 		name          string
@@ -108,15 +108,15 @@ func TestRouter_Route(t *testing.T) {
 }
 
 func TestRouter_Route_MissingEndpoint(t *testing.T) {
-	customerToPlacement := map[string]string{
+	routingTable := map[string]string{
 		"orphan": "orphan-placement",
 	}
 
-	placementToEndpoint := map[string]string{
+	cellEndpoints := map[string]string{
 		"tier3": "http://cell-tier3:9003",
 	}
 
-	router := NewRouter(customerToPlacement, placementToEndpoint, "tier3")
+	router := NewRouter(routingTable, cellEndpoints, "tier3")
 
 	_, err := router.Route("orphan")
 	if err == nil {

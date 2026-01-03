@@ -19,14 +19,14 @@ func main() {
 	logger := logging.NewLogger()
 
 	// Define routing mappings (immutable after initialization)
-	customerToPlacement := map[string]string{
+	routingTable := map[string]string{
 		"acme":    "tier1",
 		"globex":  "tier2",
 		"initech": "tier3",
 		"visa":    "visa",
 	}
 
-	placementToEndpoint := map[string]string{
+	cellEndpoints := map[string]string{
 		"tier1": "http://cell-tier1:9001",
 		"tier2": "http://cell-tier2:9002",
 		"tier3": "http://cell-tier3:9003",
@@ -36,7 +36,7 @@ func main() {
 	defaultPlacement := "tier3"
 
 	// Create router
-	router := routing.NewRouter(customerToPlacement, placementToEndpoint, defaultPlacement)
+	router := routing.NewRouter(routingTable, cellEndpoints, defaultPlacement)
 
 	// Create proxy handler
 	handler := proxy.NewHandler(router, logger)

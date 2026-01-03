@@ -20,50 +20,37 @@ type RoutingDecision struct {
 
 // Router handles routing decisions based on routing keys
 type Router struct {
-	customerToPlacement map[string]string
-	placementToEndpoint map[string]string
-	defaultPlacement    string
+	routingTable     map[string]string
+	cellEndpoints    map[string]string
+	defaultPlacement string
 }
 
 // NewRouter creates a new Router with the given mappings
 func NewRouter(
-	customerToPlacement map[string]string,
-	placementToEndpoint map[string]string,
+	routingTable map[string]string,
+	cellEndpoints map[string]string,
 	defaultPlacement string,
 ) *Router {
 	return &Router{
-		customerToPlacement: customerToPlacement,
-		placementToEndpoint: placementToEndpoint,
-		defaultPlacement:    defaultPlacement,
+		routingTable:     routingTable,
+		cellEndpoints:    cellEndpoints,
+		defaultPlacement: defaultPlacement,
 	}
 }
 
 // Route determines the placement and endpoint for a given routing key
 func (r *Router) Route(routingKey string) (*RoutingDecision, error) {
-	var placementKey string
-	var reason RouteReason
-
-	// Determine placement key and reason
-	if routingKey == "" {
-		// Missing routing key -> default
+	// Lookup placement (use default if not found or empty)
+	placementKey, found := r.routingTable[routingKey]
+	if !found || routingKey == "" {
 		placementKey = r.defaultPlacement
-		reason = ReasonDefault
-	} else if placement, found := r.customerToPlacement[routingKey]; found {
-		// Routing key found
-		placementKey = placement
-		if r.isTier(placementKey) {
-			reason = ReasonTier
-		} else {
-			reason = ReasonDedicated
-		}
-	} else {
-		// Routing key not found -> default
-		placementKey = r.defaultPlacement
-		reason = ReasonDefault
 	}
 
+	// Determine reason
+	reason := r.determineReason(routingKey, found)
+
 	// Lookup endpoint URL
-	endpointURL, found := r.placementToEndpoint[placementKey]
+	endpointURL, found := r.cellEndpoints[placementKey]
 	if !found {
 		return nil, fmt.Errorf("no endpoint configured for placement: %s", placementKey)
 	}
@@ -73,6 +60,19 @@ func (r *Router) Route(routingKey string) (*RoutingDecision, error) {
 		Reason:       reason,
 		EndpointURL:  endpointURL,
 	}, nil
+}
+
+// determineReason returns the routing reason based on the lookup result
+func (r *Router) determineReason(routingKey string, found bool) RouteReason {
+	if !found || routingKey == "" {
+		return ReasonDefault
+	}
+
+	placementKey := r.routingTable[routingKey]
+	if r.isTier(placementKey) {
+		return ReasonTier
+	}
+	return ReasonDedicated
 }
 
 // isTier checks if the placement key is a shared tier

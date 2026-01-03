@@ -17,14 +17,14 @@ Implement a minimal but production-ready reverse proxy that routes requests to c
 ┌─────────────────────────────┐
 │  Router (Port 8080)         │
 │  ┌───────────────────────┐  │
-│  │ customerToPlacement   │  │
+│  │ routingTable          │  │
 │  │ "acme" → "tier1"      │  │
 │  │ "globex" → "tier2"    │  │
 │  │ "initech" → "tier3"   │  │
 │  │ "visa" → "visa"       │  │
 │  └───────────────────────┘  │
 │  ┌───────────────────────┐  │
-│  │ placementToEndpoint   │  │
+│  │ cellEndpoints         │  │
 │  │ "tier1" → cell-tier1  │  │
 │  │ "tier2" → cell-tier2  │  │
 │  │ "tier3" → cell-tier3  │  │

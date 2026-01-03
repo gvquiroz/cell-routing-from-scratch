@@ -115,8 +115,3 @@ This is not a production framework, API gateway, or deployable service mesh. It 
 - No distributed coordination (per-router state only)
 
 Future milestones add operational complexity (hot reload, CP integration, health checks) but maintain focus on architecture over features.
-
-## License
-
-MIT
-
