@@ -1,0 +1,68 @@
+services:
+  router:
+    build:
+      context: .
+      dockerfile: Dockerfile.router
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+    depends_on:
+      - cell-tier1
+      - cell-tier2
+      - cell-tier3
+      - cell-visa
+    networks:
+      - cell-network
+
+  cell-tier1:
+    build:
+      context: .
+      dockerfile: Dockerfile.cell
+    environment:
+      - CELL_NAME=tier1
+      - PORT=9001
+    expose:
+      - "9001"
+    networks:
+      - cell-network
+
+  cell-tier2:
+    build:
+      context: .
+      dockerfile: Dockerfile.cell
+    environment:
+      - CELL_NAME=tier2
+      - PORT=9002
+    expose:
+      - "9002"
+    networks:
+      - cell-network
+
+  cell-tier3:
+    build:
+      context: .
+      dockerfile: Dockerfile.cell
+    environment:
+      - CELL_NAME=tier3
+      - PORT=9003
+    expose:
+      - "9003"
+    networks:
+      - cell-network
+
+  cell-visa:
+    build:
+      context: .
+      dockerfile: Dockerfile.cell
+    environment:
+      - CELL_NAME=visa
+      - PORT=9004
+    expose:
+      - "9004"
+    networks:
+      - cell-network
+
+networks:
+  cell-network:
+    driver: bridge

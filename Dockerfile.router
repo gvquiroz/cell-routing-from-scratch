@@ -1,0 +1,27 @@
+# Build stage
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+
+# Copy go mod files (go.sum is optional if no dependencies)
+COPY go.mod go.su[m] ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build router binary
+RUN CGO_ENABLED=0 GOOS=linux go build -o /router ./cmd/router
+
+# Runtime stage
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates
+
+WORKDIR /root/
+
+COPY --from=builder /router .
+
+EXPOSE 8080
+
+CMD ["./router"]
