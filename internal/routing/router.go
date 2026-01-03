@@ -2,6 +2,13 @@ package routing
 
 import "fmt"
 
+// ConfigProvider provides access to routing configuration
+type ConfigProvider interface {
+	GetRoutingTable() map[string]string
+	GetCellEndpoints() map[string]string
+	GetDefaultPlacement() string
+}
+
 // RouteReason indicates why a particular placement was chosen
 type RouteReason string
 
@@ -20,37 +27,49 @@ type RoutingDecision struct {
 
 // Router handles routing decisions based on routing keys
 type Router struct {
-	routingTable     map[string]string
-	cellEndpoints    map[string]string
-	defaultPlacement string
+	configProvider ConfigProvider
 }
 
-// NewRouter creates a new Router with the given mappings
-func NewRouter(
+// NewRouter creates a new Router with a config provider
+func NewRouter(configProvider ConfigProvider) *Router {
+	return &Router{
+		configProvider: configProvider,
+	}
+}
+
+// NewRouterWithMaps creates a new Router with static maps (for backward compatibility and tests)
+func NewRouterWithMaps(
 	routingTable map[string]string,
 	cellEndpoints map[string]string,
 	defaultPlacement string,
 ) *Router {
 	return &Router{
-		routingTable:     routingTable,
-		cellEndpoints:    cellEndpoints,
-		defaultPlacement: defaultPlacement,
+		configProvider: &staticConfig{
+			routingTable:     routingTable,
+			cellEndpoints:    cellEndpoints,
+			defaultPlacement: defaultPlacement,
+		},
 	}
 }
 
 // Route determines the placement and endpoint for a given routing key
 func (r *Router) Route(routingKey string) (*RoutingDecision, error) {
+	// Get current config atomically
+	routingTable := r.configProvider.GetRoutingTable()
+	cellEndpoints := r.configProvider.GetCellEndpoints()
+	defaultPlacement := r.configProvider.GetDefaultPlacement()
+
 	// Lookup placement (use default if not found or empty)
-	placementKey, found := r.routingTable[routingKey]
+	placementKey, found := routingTable[routingKey]
 	if !found || routingKey == "" {
-		placementKey = r.defaultPlacement
+		placementKey = defaultPlacement
 	}
 
 	// Determine reason
-	reason := r.determineReason(routingKey, found)
+	reason := r.determineReason(routingKey, placementKey, found)
 
 	// Lookup endpoint URL
-	endpointURL, found := r.cellEndpoints[placementKey]
+	endpointURL, found := cellEndpoints[placementKey]
 	if !found {
 		return nil, fmt.Errorf("no endpoint configured for placement: %s", placementKey)
 	}
@@ -63,12 +82,11 @@ func (r *Router) Route(routingKey string) (*RoutingDecision, error) {
 }
 
 // determineReason returns the routing reason based on the lookup result
-func (r *Router) determineReason(routingKey string, found bool) RouteReason {
+func (r *Router) determineReason(routingKey, placementKey string, found bool) RouteReason {
 	if !found || routingKey == "" {
 		return ReasonDefault
 	}
 
-	placementKey := r.routingTable[routingKey]
 	if r.isTier(placementKey) {
 		return ReasonTier
 	}
@@ -78,4 +96,23 @@ func (r *Router) determineReason(routingKey string, found bool) RouteReason {
 // isTier checks if the placement key is a shared tier
 func (r *Router) isTier(placementKey string) bool {
 	return placementKey == "tier1" || placementKey == "tier2" || placementKey == "tier3"
+}
+
+// staticConfig implements ConfigProvider for static/test configurations
+type staticConfig struct {
+	routingTable     map[string]string
+	cellEndpoints    map[string]string
+	defaultPlacement string
+}
+
+func (s *staticConfig) GetRoutingTable() map[string]string {
+	return s.routingTable
+}
+
+func (s *staticConfig) GetCellEndpoints() map[string]string {
+	return s.cellEndpoints
+}
+
+func (s *staticConfig) GetDefaultPlacement() string {
+	return s.defaultPlacement
 }

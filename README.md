@@ -25,8 +25,8 @@ Each milestone introduces a new layer of control plane sophistication while pres
 
 | Milestone | Control Plane | Data Plane Behavior | Key Tradeoff |
 |-----------|---------------|---------------------|--------------|
-| **M1** | Static (none) | Hardcoded in-memory routing | Zero operational complexity; zero flexibility |
-| **M2** | File + hot-reload | Atomic swap on file change | Local config; manual distribution |
+| **M1** ✅ | Static (none) | Hardcoded in-memory routing | Zero operational complexity; zero flexibility |
+| **M2** ✅ | File + hot-reload | Atomic swap on file change | Local config; manual distribution |
 | **M3** | WebSocket push | Receives CP updates; survives CP outage | CP coordinates fleet; DP stays autonomous |
 | **M4** | Health state + limits | Local health checks, rate limits, circuit breakers | Per-router state; no global coordination |
 | **M5** | (Pingora reimpl) | Compare stdlib vs async runtime tradeoffs | Go simplicity vs Rust performance |
@@ -43,6 +43,12 @@ docker compose up --build
 curl -H "X-Routing-Key: visa" http://localhost:8080/    # → dedicated cell
 curl -H "X-Routing-Key: acme" http://localhost:8080/    # → shared tier1
 curl -H "X-Routing-Key: unknown" http://localhost:8080/ # → default tier3
+
+# Check current config (M2)
+curl http://localhost:8080/debug/config
+
+# Hot-reload test (M2)
+# Edit config/routing.json, wait 5-10 seconds, check /debug/config again
 
 # Each response includes routing decision headers
 # X-Routed-To: visa
@@ -77,13 +83,16 @@ Comparing Go's stdlib HTTP proxy (goroutines, GC) against Pingora's async runtim
 
 ## Implementation Notes
 
-**Current (M1)**: Static routing with streaming reverse proxy in Go. No external dependencies beyond stdlib. Routing maps are immutable after initialization; no locking required for concurrent requests.
+**Current (M1-M2)**: File-based configuration with hot-reload (5s polling). Atomic config swaps using `atomic.Value`; validation ensures consistency before applying updates. Falls back to last-known-good config on validation failure. Streaming reverse proxy in Go with no external dependencies.
 
 **Routing model**: Two-level lookup (`routingKey → placementKey → endpoint`) with default fallback. Unknown routing keys map to `tier3`; missing header returns 400.
 
-**Observability**: Structured JSON logs include request ID, routing decision, timing. Each cell logs incoming requests with forwarded metadata.
+**Config hot-reload (M2)**: Polls `config/routing.json` every 5 seconds, validates changes, atomically swaps routing tables. Invalid configs are rejected with clear error logs while router continues serving with previous valid config.
 
-[Milestone 1 specification](docs/milestones/milestone-1.md)
+**Observability**: Structured JSON logs include request ID, routing decision, timing. Each cell logs incoming requests with forwarded metadata. Debug endpoint at `/debug/config` shows current version and last reload timestamp.
+
+[Milestone 1 specification](docs/milestones/milestone-1.md)  
+[Milestone 2 specification](docs/milestones/milestone-2.md)
 
 ## Project Structure
 
@@ -91,9 +100,12 @@ Comparing Go's stdlib HTTP proxy (goroutines, GC) against Pingora's async runtim
 cmd/router/       # Data plane: routing + proxy
 cmd/cell/         # Demo backend cells
 internal/
+├── config/       # Config parsing, validation, hot-reload (M2)
 ├── routing/      # Routing decision logic + tests
 ├── proxy/        # HTTP reverse proxy with streaming
+├── debug/        # Debug endpoints (M2)
 └── logging/      # Structured JSON logging
+config/           # Sample routing configuration (M2)
 docs/milestones/  # Architecture specifications per milestone
 ```
 

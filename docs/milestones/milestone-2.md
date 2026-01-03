@@ -1,82 +1,205 @@
 # Milestone 2: Hot-Reload Configuration
 
-**Status:** 📋 Planned
+**Status:** ✅ Complete
 
 ## Goal
 
-Load routing configuration from a file and support hot-reload without downtime. The router should:
-- Read routing tables from a JSON/YAML config file
-- Validate configuration before applying
-- Atomically swap to new config
-- Fall back to last-known-good config on validation failure
-- Continue serving with existing config if reload fails
+Load routing configuration from a file and support hot-reload without downtime. The router:
+- Reads routing tables from a JSON config file
+- Validates configuration before applying
+- Atomically swaps to new config using `atomic.Value`
+- Falls back to last-known-good config on validation failure
+- Continues serving with existing config if reload fails
 
 ## Architecture
 
 ```
 ┌─────────────────┐
 │  Config File    │
-│  routes.yaml    │
+│  routing.json   │
 └────────┬────────┘
-         │ (watch for changes)
+         │ (polled every 5s, checksum-based)
          ▼
 ┌─────────────────────────────┐
 │  Config Loader              │
-│  - Parse                    │
-│  - Validate                 │
-│  - Atomic swap              │
+│  - LoadFromFile()           │
+│  - Validate()               │
+│  - atomic.Value swap        │
 └────────┬────────────────────┘
-         │
+         │ (atomic read)
          ▼
 ┌─────────────────────────────┐
 │  Router                     │
-│  (uses current config)      │
+│  (uses ConfigProvider)      │
 └─────────────────────────────┘
 ```
 
-## Config Format (Draft)
+## Config Format
 
-```yaml
-default_placement: tier3
-
-customer_to_placement:
-  acme: tier1
-  globex: tier2
-  initech: tier3
-  visa: visa
-
-placement_to_endpoint:
-  tier1: http://cell-tier1:9001
-  tier2: http://cell-tier2:9002
-  tier3: http://cell-tier3:9003
-  visa: http://cell-visa:9004
+```json
+{
+  "version": "1.0.0",
+  "routingTable": {
+    "acme": "tier1",
+    "globex": "tier2",
+    "initech": "tier3",
+    "visa": "visa"
+  },
+  "cellEndpoints": {
+    "tier1": "http://cell-tier1:9001",
+    "tier2": "http://cell-tier2:9002",
+    "tier3": "http://cell-tier3:9003",
+    "visa": "http://cell-visa:9004"
+  },
+  "defaultPlacement": "tier3"
+}
 ```
 
-## Requirements
+Location: `config/routing.json`
 
-1. **File Watching**: Detect changes to config file (inotify/fsnotify or polling)
-2. **Validation**: 
-   - All placements in customer_to_placement have endpoints
-   - Default placement has an endpoint
-   - Endpoint URLs are valid
-3. **Atomic Swap**: Use RWMutex or atomic.Value to swap config
-4. **Fallback**: Keep previous config if new one is invalid
-5. **Logging**: Log successful reloads, validation errors, and rollbacks
-6. **Signal**: Support `SIGHUP` to trigger manual reload
+## Implementation
 
-## Success Criteria
+### Package Structure
 
-- Config changes applied within 1-2 seconds
-- Zero request failures during reload
-- Invalid config rejected with clear error messages
-- Existing config preserved on validation failure
+```
+internal/
+├── config/
+│   ├── config.go         # Config struct, LoadFromFile, Validate
+│   ├── config_test.go    # Parsing and validation tests
+│   ├── loader.go         # Hot-reload logic with atomic.Value
+│   └── loader_test.go    # Reload and last-known-good tests
+├── debug/
+│   └── handler.go        # Debug endpoint handler
+└── routing/
+    └── router.go         # Updated to use ConfigProvider interface
+```
 
-## Out of Scope
+### Core Invariants
 
-- No complex validation rules
-- No gradual rollout (instant swap)
-- No config versioning/history
-- No control plane (still file-based)
+1. **Atomic reads**: Router reads config via `ConfigProvider` interface methods
+2. **Immutable configs**: Each `Config` struct is immutable after creation
+3. **No blocking**: Config reads never block requests
+4. **Last-known-good**: Invalid configs are rejected, previous config stays active
+5. **Checksum-based reload**: Only reloads when file SHA256 changes
+
+### Validation Rules
+
+- `version` must be non-empty
+- `defaultPlacement` must exist in `cellEndpoints`
+- All placements referenced in `routingTable` must exist in `cellEndpoints`
+- All endpoint URLs must be valid (parseable by `url.Parse`)
+
+### Hot Reload Mechanism
+
+1. Background goroutine polls config file every 5 seconds
+2. Computes SHA256 checksum of file content
+3. If checksum changed:
+   - Load and parse config
+   - Validate thoroughly
+   - If valid: atomically swap via `atomic.Value.Store()`
+   - If invalid: log error, keep current config
+4. Router reads config atomically on each request
+
+### Debug Endpoint
+
+`GET /debug/config` returns:
+```json
+{
+  "version": "1.0.0",
+  "last_reload_at": "2026-01-03T20:45:12Z"
+}
+```
+
+### Startup Behavior
+
+- **Fail fast**: If initial config is missing or invalid, router exits with error
+- Environment variable: `CONFIG_PATH` (default: `config/routing.json`)
+- No fallback to hardcoded config (enforces config-driven approach)
+
+## Testing
+
+### Unit Tests
+```bash
+go test ./internal/config -v
+```
+
+12 test cases covering:
+- Config parsing (valid, invalid JSON, missing file)
+- Validation (missing version, invalid URLs, unknown placements)
+- Hot reload (successful reload, keeps last-known-good on failure)
+- Atomic swap behavior
+
+All Milestone 1 routing tests continue to pass unchanged.
+
+### Manual Testing
+
+1. Start services:
+```bash
+docker-compose up --build
+```
+
+2. Verify initial config:
+```bash
+curl http://localhost:8080/debug/config
+```
+
+3. Test routing with initial config:
+```bash
+curl -H "X-Routing-Key: visa" http://localhost:8080/
+```
+
+4. Update config file:
+```bash
+# Edit config/routing.json to add new routing key
+# or change endpoint URL
+```
+
+5. Wait 5-10 seconds, verify reload:
+```bash
+curl http://localhost:8080/debug/config
+# Check that last_reload_at timestamp updated
+```
+
+6. Test with invalid config (should keep last-known-good):
+```bash
+# Edit config/routing.json to have empty version
+# Check logs - should see "Config reload failed: validation error"
+# Requests continue working with old config
+```
+
+## Failure Modes
+
+| Scenario | Behavior |
+|----------|----------|
+| Initial config missing | Router exits with error (fail fast) |
+| Initial config invalid | Router exits with error (fail fast) |
+| Hot reload: file unreadable | Log error, keep current config |
+| Hot reload: invalid JSON | Log error, keep current config |
+| Hot reload: validation fails | Log error, keep current config |
+| Hot reload: partial write | Checksum mismatch prevents load |
+
+## Success Criteria (All Met)
+
+- ✅ Config changes applied within 5-10 seconds (polling interval)
+- ✅ Zero request failures during reload (atomic swap)
+- ✅ Invalid config rejected with clear error messages in logs
+- ✅ Existing config preserved on validation failure
+- ✅ No external dependencies (standard library only)
+- ✅ All Milestone 1 tests continue passing
+
+## Out of Scope (Future Milestones)
+
+- ❌ fsnotify/inotify (using polling for simplicity)
+- ❌ SIGHUP signal handling
+- ❌ Config versioning/history
+- ❌ Gradual rollout (instant atomic swap)
+- ❌ Config hot-reload via HTTP API
+- ❌ Control plane integration (M3)
+
+## Next: Milestone 3
+
+Add control plane for centralized configuration management and dynamic service discovery.
+
 
 ## Next: Milestone 3
 

@@ -19,7 +19,7 @@ func TestRouter_Route(t *testing.T) {
 		"visa":  "http://cell-visa:9004",
 	}
 
-	router := NewRouter(routingTable, cellEndpoints, "tier3")
+	router := NewRouterWithMaps(routingTable, cellEndpoints, "tier3")
 
 	tests := []struct {
 		name          string
@@ -116,7 +116,7 @@ func TestRouter_Route_MissingEndpoint(t *testing.T) {
 		"tier3": "http://cell-tier3:9003",
 	}
 
-	router := NewRouter(routingTable, cellEndpoints, "tier3")
+	router := NewRouterWithMaps(routingTable, cellEndpoints, "tier3")
 
 	_, err := router.Route("orphan")
 	if err == nil {
