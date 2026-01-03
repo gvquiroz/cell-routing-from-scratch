@@ -1,77 +1,72 @@
 # Cell Routing from Scratch
 
-A learning-focused implementation of the ingress routing layer in a cell-based architecture. This reverse proxy routes requests to different "cells" based on a trusted header, demonstrating how large-scale systems route traffic to isolated tenant environments.
+Learn how cell-based architectures route traffic by building an educational reverse proxy from first principles. This project demonstrates control plane/data plane separation, local routing decisions, and resilience patterns through clear, incremental milestones.
 
 ## Quick Start
 
 ```bash
-# Start all services
+# Start router + 4 demo cells
 docker compose up --build
 
-# Test routing (in another terminal)
+# Test routing
 curl -H "X-Routing-Key: visa" http://localhost:8080/
 curl -H "X-Routing-Key: acme" http://localhost:8080/
 
 # Run automated tests
 ./test-routing.sh
-
-# View logs
-docker compose logs -f router
 ```
 
 ## How It Works
 
-**Client Request** → **Router** (reads `X-Routing-Key`) → **Target Cell**
-
-The router maintains two mappings:
-1. **Customer → Placement**: `acme` → `tier1`, `visa` → `visa` (dedicated)
-2. **Placement → Endpoint**: `tier1` → `http://cell-tier1:9001`
-
-Unknown or missing keys default to `tier3`.
-
-### Response Headers
-
-Every response includes:
-- `X-Routed-To`: The placement key (tier1/tier2/tier3/visa)
-- `X-Route-Reason`: Why? (`dedicated`, `tier`, or `default`)
-
-## Routing Examples
+**Client** → **Router** (reads `X-Routing-Key`) → **Target Cell**
 
 ```bash
 # Dedicated cell
 curl -H "X-Routing-Key: visa" http://localhost:8080/
 # → X-Routed-To: visa, X-Route-Reason: dedicated
 
-# Shared tier
+# Shared tier (tier1)
 curl -H "X-Routing-Key: acme" http://localhost:8080/
 # → X-Routed-To: tier1, X-Route-Reason: tier
 
-# Unknown key → defaults to tier3
+# Unknown → defaults to tier3
 curl -H "X-Routing-Key: unknown" http://localhost:8080/
 # → X-Routed-To: tier3, X-Route-Reason: default
-
-# Missing header
-curl http://localhost:8080/
-# → 400 Bad Request: X-Routing-Key header is required
 ```
 
-## Current Mappings
+Response headers show routing decision: `X-Routed-To`, `X-Route-Reason`
 
-| Customer | Placement | Endpoint |
-|----------|-----------|----------|
-| acme | tier1 | http://cell-tier1:9001 |
-| globex | tier2 | http://cell-tier2:9002 |
-| initech | tier3 | http://cell-tier3:9003 |
-| visa | visa (dedicated) | http://cell-visa:9004 |
-| *unknown* | tier3 (default) | http://cell-tier3:9003 |
+## Milestones
 
-## Features
+| # | Status | Description | Docs |
+|---|--------|-------------|------|
+| **M1** | ✅ Complete | Static in-memory routing with streaming proxy | [Details](docs/milestones/milestone-1.md) |
+| **M2** | 📋 Planned | Hot-reload config from file | [Details](docs/milestones/milestone-2.md) |
+| **M3** | 📋 Planned | Control plane push via WebSocket | [Details](docs/milestones/milestone-3.md) |
+| **M4** | 📋 Planned | Health checks, rate limiting, circuit breakers | [Details](docs/milestones/milestone-4.md) |
+| **M5** | 📋 Planned | Reimplement in Pingora for comparison | [Details](docs/milestones/milestone-5.md) |
 
-- ✅ Header-based routing with `X-Routing-Key`
-- ✅ Streaming reverse proxy (no buffering)
-- ✅ Structured JSON logging
-- ✅ Connection pooling with timeouts
-- ✅ Explainability headers
+[📚 Milestone Overview](docs/milestones/README.md)
+
+## Project Structure
+
+```
+cmd/router/       # Router entrypoint
+cmd/cell/         # Demo cell server
+internal/
+├── routing/      # Routing logic + tests
+├── proxy/        # HTTP proxy handler
+└── logging/      # Structured logging
+docs/milestones/  # Detailed specs
+```
+
+## What You'll Learn
+
+- **CP/DP Separation**: Control plane never in hot path; routing is local and fast
+- **Graceful Degradation**: Router stays up even if control plane is down
+- **Resilience Patterns**: Health checks, circuit breakers, rate limiting (M4)
+- **Proxy Internals**: Streaming, connection pooling, timeouts
+- **Go vs Pingora**: Stdlib proxy vs edge-grade proxy runtime (M5)
 
 ## Development
 
@@ -81,39 +76,10 @@ go test ./...
 
 # Run locally without Docker
 CELL_NAME=tier1 PORT=9001 go run cmd/cell/main.go &
-CELL_NAME=tier2 PORT=9002 go run cmd/cell/main.go &
-CELL_NAME=tier3 PORT=9003 go run cmd/cell/main.go &
-CELL_NAME=visa PORT=9004 go run cmd/cell/main.go &
 go run cmd/router/main.go
 ```
 
-## Project Structure
-
-```
-cmd/
-├── router/main.go       # Router entrypoint
-└── cell/main.go         # Demo cell server
-internal/
-├── routing/             # Routing logic + tests
-├── proxy/               # HTTP proxy handler
-└── logging/             # Structured logging
-```
-
-Configuration is in [cmd/router/main.go](cmd/router/main.go). Timeouts are in [internal/proxy/handler.go](internal/proxy/handler.go).
-
-## Milestone 1 Scope
-
-**Included:**
-- In-memory deterministic routing
-- Streaming proxy with explainability
-- JSON logging
-
-**Not Included (future milestones):**
-- Hot reload / control plane
-- Health checks / circuit breakers  
-- Rate limiting / retries
-- Authentication
-- High availability
+See [Milestone 1 docs](docs/milestones/milestone-1.md) for complete implementation details.
 
 ## License
 
