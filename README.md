@@ -1,68 +1,119 @@
 # Cell Routing from Scratch
 
-An educational implementation of cell-based ingress routing that makes control plane and data plane separation explicit. This repository demonstrates how production edge systems maintain local routing decisions while allowing centralized configuration distribution, and why that separation matters for large-scale reliability.
+A working implementation of cell-based ingress routing that demonstrates control plane / data plane separation from first principles. This repository explores how production edge systems maintain local routing decisions while distributing centralized configuration—and why that architectural pattern matters for reliability at scale.
 
-## Problem Statement
+## What This Repository Contains
 
-Cell-based architectures isolate workloads into independent failure domains—dedicated tenant environments or shared capacity tiers. The ingress layer routes requests to cells based on request context (customer ID, tenant identifier, etc.) without introducing synchronous dependencies during request processing.
+**A progression of four milestones** that build a functional ingress router with control plane distribution, health-aware routing, circuit breaking, and overload protection. Each milestone preserves core invariants (local routing decisions, atomic config updates, graceful degradation) while adding operational capability.
 
-This constraint—local routing decisions with asynchronous config updates—appears in every production edge system: Envoy's xDS protocol, service mesh control planes, CDN edge nodes. The pattern is well-understood at scale but rarely demonstrated in isolation.
+**A collection of design annexes** that examine architectural questions beyond the core implementation: request processing pipelines, caching placement, rate limiting strategies, authentication boundaries, shuffle sharding, and runtime mappings (Pingora, Cloudflare Workers). These are comparative explorations, not feature proposals.
 
-This repository builds that pattern from first principles across four milestones:
+This is an architectural case study with working code. It demonstrates patterns from production edge systems (Envoy xDS, service mesh control planes, CDN edge nodes) in isolation, with explicit tradeoff documentation.
 
-1. Static routing with in-memory tables
-2. Atomic config swaps with last-known-good fallback  
-3. WebSocket-based control plane distribution
-4. Local resilience (health checks, circuit breakers, overload protection)
+## How to Read This Repository
 
-Each milestone preserves the fundamental invariants while adding operational capability.
+**If you want to understand cell-based routing architecture:**
+Start with [Milestone 1](docs/milestones/milestone-1.md) and progress through M4. Each milestone is self-contained and runnable. Focus on the "Design Decisions" and "Failure Modes" sections—they explain the architectural reasoning.
+
+**If you want to see control plane / data plane separation:**
+Read [Milestone 3](docs/milestones/milestone-3.md) and review the `internal/controlplane/` and `internal/dataplane/` implementations. The WebSocket protocol and reconnection logic demonstrate asynchronous config distribution.
+
+**If you want to explore design tradeoffs:**
+Read the [Design Annexes](docs/annexes/README.md). These generalize the lessons from the implementation and compare alternative approaches. Start with "Request Processing Pipelines" and "Caching and CDN" for foundational concepts.
+
+**If you want to run it locally:**
+See the Quick Start section below. Docker Compose brings up the full system (control plane + router + demo cells) in one command.
+
+## What This Is Not
+
+**Not a production gateway.** This repository omits distributed tracing, metrics pipelines, TLS termination, and operational tooling required for production deployment. It demonstrates architectural patterns, not production-ready infrastructure.
+
+**Not a CDN implementation.** Caching, edge compute, and geographic routing are discussed in annexes but not implemented. The focus is ingress routing and control plane distribution.
+
+**Not a framework.** This is not designed to be imported or extended. It's an educational artifact that makes implicit patterns explicit.
+
+**Not feature-complete.** Capabilities like rate limiting, authentication, and WAF integration are explored in annexes but excluded from the core implementation to maintain focus on routing and resilience fundamentals.
 
 ## Architectural Invariants
 
-These constraints hold across all milestones:
+These constraints define the system and hold across all milestones:
 
 **Control plane never in request path**  
-Routing decisions use only local, in-memory state. No RPC to a control plane during request processing. Config updates are asynchronous—data plane applies them when received, not when requested.
+Routing decisions use only local, in-memory state. No RPC to control plane during request processing. Config updates are asynchronous—data plane applies them when received, not when requested. This preserves availability (data plane survives control plane failure) and performance (no blocking on remote calls).
 
 **Atomic configuration updates**  
-New routing tables are validated before application. Swaps are atomic via `atomic.Value`; no partial state visible to concurrent requests. Invalid configs are rejected, previous config remains active.
+New routing tables are validated before application. Swaps are atomic via `atomic.Value`—no partial state visible to concurrent requests. Invalid configs are rejected; previous config remains active. This prevents invalid routing state from affecting traffic.
 
 **Graceful degradation**  
-Data plane survives control plane downtime indefinitely. Routers operate with last-known-good config. Control plane unavailability does not impact request serving.
+Data plane operates indefinitely with last-known-good config when control plane is unavailable. Routers do not block, fail, or degrade when control plane is unreachable. This decouples data plane availability from control plane availability.
 
-These invariants mirror patterns from production systems: Envoy operates from local snapshots pushed via xDS; service mesh data planes maintain autonomy from their control planes; CDN edge nodes make routing decisions from locally-cached config.
+**Local resilience state**  
+Health checks, circuit breakers, and overload limits maintain per-router state. No distributed coordination for resilience decisions. Routers make independent failover choices based on local observations. This trades consistency for autonomy—different routers may route the same key differently during transient failures.
+
+These invariants mirror patterns from production edge systems: Envoy operates from local snapshots pushed via xDS, service meshes maintain data plane autonomy, CDN edge nodes make routing decisions from cached config.
 
 ## Milestone Progression
 
-This progression mirrors how production edge systems evolve from static configuration to centralized orchestration:
+This progression demonstrates how ingress routers evolve from static configuration to centralized orchestration with local resilience:
 
-| Milestone | Status | Capability Added | Architectural Tradeoff |
-|-----------|--------|------------------|------------------------|
-| **[M1: Static Routing](docs/milestones/milestone-1.md)** | ✅ Complete | In-memory routing, streaming proxy | Zero operational complexity; zero config flexibility |
-| **[M2: Atomic Config Reload](docs/milestones/milestone-2.md)** | ✅ Complete | File-based hot-reload with validation | Local config management; manual propagation to fleet |
-| **[M3: Control Plane Distribution](docs/milestones/milestone-3.md)** | ✅ Complete | WebSocket push from centralized CP | Centralized config source; DP maintains local autonomy |
-| **[M4: Local Resilience](docs/milestones/milestone-4.md)** | ✅ Complete | Health checks, circuit breakers, overload protection | Per-router resilience state; no cross-router coordination |
+| Milestone | Capability | Architectural Tradeoff |
+|-----------|------------|------------------------|
+| **[M1: Static Routing](docs/milestones/milestone-1.md)** | In-memory routing tables, streaming HTTP proxy | Zero operational complexity; zero config flexibility |
+| **[M2: Atomic Config Reload](docs/milestones/milestone-2.md)** | File-based hot-reload with validation | Local config management; manual propagation across fleet |
+| **[M3: Control Plane Distribution](docs/milestones/milestone-3.md)** | WebSocket config push from centralized control plane | Centralized config source; data plane maintains autonomy |
+| **[M4: Local Resilience](docs/milestones/milestone-4.md)** | Health checks, circuit breakers, concurrency limits | Per-router resilience state; no cross-router coordination |
 
-### Architectural Progression
+### Key Architectural Transitions
 
-**M1** establishes the baseline: routing decisions use only local, in-memory state. No external dependencies during request processing.
+**M1 → M2**: Routing tables become mutable. Introduced validation (pre-apply checks) and atomicity (no partial updates). Last-known-good fallback prevents invalid config from breaking routing.
 
-**M2** introduces configuration flexibility via atomic swaps. Routing tables become mutable, but updates must be validated before application. Last-known-good config prevents invalid updates from breaking routing.
+**M2 → M3**: Separated config source from config application. Control plane becomes authoritative; data plane receives updates asynchronously. Data plane survives control plane failure indefinitely.
 
-**M3** separates config source from config application. Control plane becomes authoritative source; data plane receives updates asynchronously. Data plane survives control plane failure indefinitely—routing continues with last-known-good config.
+**M3 → M4**: Added local resilience without distributed coordination. Health checks detect unhealthy upstreams, circuit breakers prevent cascading failures, concurrency limits protect against overload. All state remains local—different routers may make different routing decisions during failures.
 
-**M4** adds per-router resilience without distributed coordination. Health checks detect unhealthy upstreams; circuit breakers prevent cascading failures; concurrency limits protect against overload. All state remains local to each router. Fallback routing ensures requests succeed even when primary placements fail.
+Each milestone is independently runnable and includes failure mode analysis.
 
-### Design Principles
+Each milestone is independently runnable and includes failure mode analysis.
 
-Each milestone:
-- Preserves all invariants from previous milestones
-- Adds one new operational capability
-- Documents the architectural tradeoff introduced
-- Includes failure mode analysis
-- Remains independently runnable and testable
+## Design Annexes
 
-## Running Locally
+These documents explore architectural questions beyond the core implementation. They are comparative and exploratory—examining design spaces, tradeoffs, and alternative approaches. Written for Staff+ engineers familiar with distributed systems and edge architectures.
+
+### Fundamentals
+
+**[Request Processing Pipelines](docs/annexes/request-processing-pipelines.md)**  
+How modern ingress systems compose multiple concerns (WAF, auth, rate limiting, routing) as sequential stages. Short-circuit semantics, trust boundaries, and performance implications. Go middleware and Pingora phases as examples of the same underlying model.
+
+**[Caching and CDN](docs/annexes/caching-and-cdn.md)**  
+Cache as a pipeline stage. Where caching sits relative to routing (before/after, two-tier). Tenant isolation through cache keys. Invalidation strategies and failure semantics during cell failover.
+
+### Security and Traffic Control
+
+**[Rate Limiting](docs/annexes/rate-limiting.md)**  
+Per-key rate limiting design space. Local vs sticky vs distributed enforcement. Why it's excluded from the core router scope. Tradeoffs in consistency, latency, and operational complexity.
+
+**[Authentication and Routing Keys](docs/annexes/auth-routing-key.md)**  
+Trust boundaries for routing metadata. Header injection vs JWT claims vs mTLS. Why authentication must be separated from routing logic. Implications for tenant isolation.
+
+**[WAF and Edge Security](docs/annexes/waf-and-edge-security.md)**  
+WAF placement relative to routing and cells. Global edge vs per-cell enforcement. Observability and failure modes when WAF blocks interact with health checks and circuit breakers.
+
+### Cell Isolation and Sharding
+
+**[Shuffle Sharding](docs/annexes/shuffle-sharding.md)**  
+Blast radius isolation through shard assignment. How shuffle sharding interacts with health-aware failover. Operational complexity of managing shard mappings at scale.
+
+### Platform Mappings
+
+**[Pingora Parity](docs/annexes/pingora-parity.md)**  
+Mapping data plane semantics to Cloudflare Pingora. Runtime tradeoffs: Go goroutines vs Tokio async, connection pooling, semantic equivalence. Not a rewrite guide—explains how patterns translate across runtimes.
+
+**[Workers Edge Router](docs/annexes/workers-edge-router.md)**  
+Cell routing at the edge using Cloudflare Workers. Edge-specific constraints: stateless compute, config from KV/Durable Objects, health checks without persistent state. How assumptions change when routing lives at the edge.
+
+See [docs/annexes/README.md](docs/annexes/README.md) for full context on scope and completeness.
+
+## Quick Start
 
 ```bash
 # Start control plane + router + 4 demo cells
@@ -86,53 +137,40 @@ go test ./...
 
 Router logs and cell logs available via `docker compose logs -f router` and `docker compose logs -f cell-visa`.
 
-## What This Demonstrates
-
-**Control plane / data plane separation**  
-Why routing decisions must be local (latency, blast radius, availability). How asynchronous config distribution maintains data plane autonomy. The tradeoff between centralized coordination and local resilience.
-
-**Atomic state transitions**  
-Techniques for validating and applying configuration without exposing partial state to concurrent requests. Why last-known-good config matters more than newest config.
-
-**Failure domain isolation**  
-How routers behave when control plane is unavailable, slow, or serving invalid config. Why graceful degradation requires local decision-making capability.
-
-**Operational observability**  
-What metadata enables debugging distributed routing decisions from logs alone. How to make routing decisions auditable without distributed tracing.
-
-This repository does not implement a production system. It makes the architectural patterns explicit and testable in isolation.
-
-## Implementation Status
-
-**Routing model**: Two-level indirection (`routingKey → placementKey → endpoint`) with default fallback. Placement keys represent failure domains (dedicated cells, shared tiers). Unknown routing keys default to shared tier3; missing routing key header returns 400.
-
-**Configuration separation**:
-- Control plane: watches `config/routing.json` (authoritative source)
-- Data plane: bootstraps from `config/dataplane-initial.json`, immediately replaced by CP push
-- File-only mode: data plane watches `routing.json` directly (no CP)
-
-
 ## Repository Structure
 
 ```
 cmd/
-├── router/        # Data plane: routing + proxy + CP client (M3)
-├── control-plane/ # Control plane: WebSocket broadcast (M3)
+├── router/        # Data plane: routing + proxy + CP client
+├── control-plane/ # Control plane: WebSocket broadcast
 └── cell/          # Demo backend cells
 internal/
-├── config/        # Parsing, validation, atomic swap (M2/M3/M4)
-├── routing/       # Routing decision logic + tests (M1)
-├── proxy/         # HTTP reverse proxy with resilience (M1/M4)
-├── protocol/      # WebSocket message types (M3)
-├── controlplane/  # CP server implementation (M3)
-├── dataplane/     # DP client with reconnection (M3)
-├── health/        # Active health checking (M4)
-├── circuit/       # Circuit breaker implementation (M4)
-├── limits/        # Concurrency and size limits (M4)
-├── debug/         # Debug endpoints (M2)
-└── logging/       # Structured JSON logging (M1)
+├── config/        # Parsing, validation, atomic swap
+├── routing/       # Routing decision logic
+├── proxy/         # HTTP reverse proxy with resilience
+├── protocol/      # WebSocket message types
+├── controlplane/  # CP server implementation
+├── dataplane/     # DP client with reconnection
+├── health/        # Active health checking
+├── circuit/       # Circuit breaker state machine
+├── limits/        # Concurrency and size limits
+├── debug/         # Debug endpoints
+└── logging/       # Structured JSON logging
 config/
 ├── routing.json           # Control plane config source
 └── dataplane-initial.json # Data plane bootstrap config
-docs/milestones/           # Architecture specifications per milestone
+docs/
+├── milestones/    # Milestone specifications
+└── annexes/       # Design explorations
 ```
+
+## Implementation Details
+
+**Routing model**: Two-level indirection (`routingKey → placementKey → endpoint`) with default fallback. Placement keys represent failure domains (dedicated cells, shared tiers). Unknown routing keys default to shared tier; missing routing key header returns 400.
+
+**Configuration separation**:
+- Control plane: watches `config/routing.json` (authoritative source)
+- Data plane: bootstraps from `config/dataplane-initial.json`, immediately replaced by CP push
+- File-only mode: data plane can watch `routing.json` directly (no CP required)
+
+**Observability**: All routing decisions include `X-Routed-To` (endpoint), `X-Route-Reason` (routing key + placement key), `X-Config-Version` (config hash) headers. Health state transitions, circuit breaker events, and overload rejections are logged with structured JSON. Debug endpoint (`/debug/config`) exposes current config and version.
