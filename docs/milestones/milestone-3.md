@@ -1,7 +1,5 @@
 # Milestone 3: Control Plane Distribution
 
-**Status:** ✅ Complete
-
 ## Architectural Intent
 
 Separate config source from config application. Introduce a control plane as the authoritative source of routing configuration; data plane routers receive updates asynchronously via WebSocket. The critical invariant: **data plane survives control plane failure indefinitely**—routing continues with last-known-good config.
@@ -80,19 +78,10 @@ This design prioritizes **availability over config freshness**. A router with st
 
 ## Testing
 
-**Protocol tests** (`internal/protocol/messages_test.go`): Message serialization/deserialization for config_snapshot, ack, nack.
-
 **Data plane client tests** (`internal/dataplane/client_test.go`):
 - Connection establishment and reconnection with exponential backoff
 - Config receipt, validation, and acknowledgment
 - Nack on invalid config
-
-**Integration test**: Start control plane + router via `docker compose up`. Verify:
-1. Router bootstraps with `dataplane-initial.json` (v0.0.1)
-2. Router connects to control plane, receives `routing.json` (v1.0.0)
-3. Debug endpoint shows `source: "control_plane"` and current version
-4. Edit `routing.json`, control plane broadcasts update, router applies
-5. Stop control plane, router continues serving (last-known-good config)
 
 ## Observability
 
@@ -118,12 +107,3 @@ Structured logs include control plane connection events:
 - Incremental/delta config updates (full snapshots only)
 - Multi-region control plane coordination
 - Authentication between CP and DP
-
-## Next: Milestone 4
-
-Add stateless resilience mechanisms: health checks detect unhealthy endpoints, circuit breakers prevent cascading failures, and concurrency limits protect against overload. All state remains local and in-memory.
-- Config rollback or versioned history
-- Heartbeat/ping-pong messages (connection failures detected via read timeout)
-- Gradual rollout or canary deployments
-
-This milestone establishes centralized config distribution while maintaining data plane autonomy. All M1 and M2 invariants are preserved: routing decisions remain local, config updates are atomic, invalid configs are rejected.

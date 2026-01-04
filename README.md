@@ -30,9 +30,6 @@ New routing tables are validated before application. Swaps are atomic via `atomi
 **Graceful degradation**  
 Data plane survives control plane downtime indefinitely. Routers operate with last-known-good config. Control plane unavailability does not impact request serving.
 
-**Observable routing decisions**  
-Every response includes routing metadata (`X-Routed-To`, `X-Route-Reason`) sufficient to debug placement decisions from logs alone.
-
 These invariants mirror patterns from production systems: Envoy operates from local snapshots pushed via xDS; service mesh data planes maintain autonomy from their control planes; CDN edge nodes make routing decisions from locally-cached config.
 
 ## Milestone Progression
@@ -64,8 +61,6 @@ Each milestone:
 - Documents the architectural tradeoff introduced
 - Includes failure mode analysis
 - Remains independently runnable and testable
-
-Each milestone's implementation is documented in `docs/milestones/milestone-N.md` with architectural intent, invariants preserved, failure modes considered, and implementation approach. These documents are structured as design notes focused on architectural reasoning and tradeoffs.
 
 ## Running Locally
 
@@ -109,8 +104,6 @@ This repository does not implement a production system. It makes the architectur
 
 ## Implementation Status
 
-**Current**: Milestone 4 complete. Stateless resilience mechanisms added to data plane: active health checks per endpoint, per-endpoint circuit breakers, and overload protection (concurrency limits, body size limits). All state is local and in-memory. Routers route to fallback placements when primary endpoints are unhealthy or circuits are open.
-
 **Routing model**: Two-level indirection (`routingKey → placementKey → endpoint`) with default fallback. Placement keys represent failure domains (dedicated cells, shared tiers). Unknown routing keys default to shared tier3; missing routing key header returns 400.
 
 **Configuration separation**:
@@ -118,7 +111,6 @@ This repository does not implement a production system. It makes the architectur
 - Data plane: bootstraps from `config/dataplane-initial.json`, immediately replaced by CP push
 - File-only mode: data plane watches `routing.json` directly (no CP)
 
-**Observability**: Structured JSON logs include request_id, routing decision, timing. Debug endpoint `/debug/config` shows current version, config source, last reload timestamp. Routing decision exposed in response headers for offline analysis.
 
 ## Repository Structure
 
@@ -144,17 +136,3 @@ config/
 └── dataplane-initial.json # Data plane bootstrap config
 docs/milestones/           # Architecture specifications per milestone
 ```
-
-Each milestone's implementation is documented in `docs/milestones/milestone-N.md` with architectural intent, invariants preserved, and failure modes considered.
-
-## Explicit Non-Goals
-
-This is not a production framework, API gateway, or service mesh. It is an educational artifact that makes architectural patterns testable.
-
-- No authentication or authorization (assumes trusted ingress)
-- No metrics beyond structured logs
-- No Kubernetes integration or declarative operators
-- No distributed coordination or consensus protocols
-- No request tracing or distributed debugging tools
-
-Milestones add operational complexity (config reload, control plane distribution, local resilience) while maintaining focus on core architectural patterns over feature completeness.

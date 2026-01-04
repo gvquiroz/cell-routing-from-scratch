@@ -1,7 +1,5 @@
 # Milestone 4: Stateless Resilience
 
-**Status:** ✅ Complete
-
 ## Goal
 
 Add local failure detection and overload protection without introducing shared state or control-plane dependencies. Keep the router stateless, fast, and predictable.
@@ -82,17 +80,6 @@ Request → Route → Circuit Breaker → Health Check → Semaphore → Proxy �
                     503 (open)      Fallback     429 (limit)
 ```
 
-## Observability
-
-**Logs**:
-- Health state transitions: `{"endpoint": "tier1", "state": "unhealthy", "reason": "timeout"}`
-- Circuit breaker events: `{"endpoint": "tier1", "circuit": "open", "failures": 5}`
-- Overload rejections: `{"placement": "tier1", "reason": "concurrency_limit", "limit": 100}`
-
-**Response headers**:
-- `X-Failover-Reason: upstream_unhealthy`
-- `X-Circuit-State: open`
-
 ## Out of Scope
 
 **No distributed rate limiting**: Would require Redis or shared state. Contradicts stateless design.
@@ -100,11 +87,3 @@ Request → Route → Circuit Breaker → Health Check → Semaphore → Proxy �
 **No automatic retries**: Retries require idempotency guarantees. Client layer decides.
 
 **No authentication**: Router trusts `X-Routing-Key`. Auth happens upstream.
-
-## Success Criteria
-
-- Router routes around unhealthy cells without manual intervention
-- Circuit breaker prevents retry storms during cascading failures
-- Concurrency limits protect router from overload
-- All state transitions logged and observable
-- Zero impact to fast path latency (p50 unchanged)

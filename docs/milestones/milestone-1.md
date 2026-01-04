@@ -1,10 +1,8 @@
 # Milestone 1: Static In-Memory Routing
 
-**Status:** ✅ Complete
-
 ## Architectural Intent
 
-Establish the baseline: routing decisions use only local, in-memory state. No external dependencies during request processing. Demonstrate that cell-based routing is conceptually straightforward—a two-level map lookup with a default fallback—but requires careful handling of streaming proxies, connection pooling, and observable decision-making.
+Establish the baseline: routing decisions use only local, in-memory state. Demonstrate that cell-based routing is conceptually straightforward—a two-level map lookup with a default fallback—but requires careful handling of streaming proxies, connection pooling, and decision-making.
 
 ## Core Design
 
@@ -30,28 +28,8 @@ No RPC, no database lookups, no external calls during routing. Routing tables ar
 **Streaming proxy**  
 Request and response bodies are streamed via `io.Copy`, not buffered. Large payloads flow through the proxy without memory exhaustion.
 
-**Observable routing**  
-Every response includes `X-Routed-To` (placement used) and `X-Route-Reason` (dedicated/tier/default). Sufficient metadata for debugging routing decisions from logs alone.
-
 **Connection pooling**  
 Configured `http.Transport` with reasonable timeouts (5s dial, 10s response header, 30s total request, 90s idle). Connection reuse for upstream cells.
-
-## Implementation Approach
-
-Routing logic in `internal/routing/router.go`:
-- Two maps: `routingTable` (key→placement) and `cellEndpoints` (placement→URL)
-- Maps are immutable post-initialization (no concurrent write concerns)
-- Default fallback: unknown keys map to "tier3"
-
-Proxy logic in `internal/proxy/handler.go`:
-- Standard library `http.Transport` and `http.Request`
-- Preserves original method, path, query, headers, body
-- Adds `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Request-Id`
-- Streams via `io.Copy` (no buffering)
-
-Structured logging in `internal/logging/logger.go`:
-- JSON to stdout
-- Includes: request_id, routing_key, placement_key, route_reason, duration_ms, status_code
 
 ## Failure Modes
 
@@ -64,8 +42,6 @@ Structured logging in `internal/logging/logger.go`:
 | Upstream slow | Timeout after 30s | Prevents resource exhaustion; client sees 504 |
 
 ## Testing
-
-**Unit tests** (`internal/routing/router_test.go`): 8 test cases covering dedicated routing, tier routing, default fallback, and error conditions. All tests use in-memory config; no external dependencies.
 
 **Integration test** (`test-routing.sh`): Automated script verifying all routing paths, response headers, and status codes against live demo environment.
 

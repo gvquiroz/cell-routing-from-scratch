@@ -1,7 +1,5 @@
 # Milestone 2: Atomic Config Reload
 
-**Status:** ✅ Complete
-
 ## Architectural Intent
 
 Introduce configuration mutability while preserving the invariant that routing decisions use only local state. Routing tables become hot-reloadable from a file, but updates must be atomic—concurrent requests never observe partial configuration changes. Invalid configs must be rejected without disrupting ongoing request processing.
@@ -56,11 +54,6 @@ JSON at `config/routing.json`:
 - Reads config via `GetRoutingTable()`, `GetCellEndpoints()`, `GetDefaultPlacement()`
 - Each read is an atomic operation; config snapshot is consistent
 
-**Startup behavior**:
-- Fail fast if initial config is missing or invalid
-- No hardcoded fallback; config file is required
-- Environment variable: `CONFIG_PATH` (default: `config/routing.json`)
-
 ## Failure Modes
 
 | Scenario | Behavior | Rationale |
@@ -75,8 +68,6 @@ JSON at `config/routing.json`:
 The pattern: **fail fast on startup, gracefully degrade during runtime**. Initial config errors are unrecoverable; runtime config errors are recoverable.
 
 ## Testing
-
-**Unit tests** (`internal/config/config_test.go`, `loader_test.go`): 13 test cases covering parsing, validation, hot-reload, last-known-good behavior. Tests verify that invalid configs are rejected and previous config remains active.
 
 **Manual verification**:
 1. Start router: `docker compose up --build`
@@ -99,8 +90,3 @@ The pattern: **fail fast on startup, gracefully degrade during runtime**. Initia
 This milestone adds configuration flexibility while maintaining all M1 invariants. Routing decisions remain local; config reload is asynchronous; invalid configs cannot break routing.
 
 Add control plane for centralized configuration management and dynamic service discovery.
-
-
-## Next: Milestone 3
-
-Control plane push via WebSocket with data plane autonomy.
