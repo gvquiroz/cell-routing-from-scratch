@@ -8,13 +8,12 @@ Cell-based architectures isolate workloads into independent failure domains—de
 
 This constraint—local routing decisions with asynchronous config updates—appears in every production edge system: Envoy's xDS protocol, service mesh control planes, CDN edge nodes. The pattern is well-understood at scale but rarely demonstrated in isolation.
 
-This repository builds that pattern from first principles across five milestones:
+This repository builds that pattern from first principles across four milestones:
 
 1. Static routing with in-memory tables
 2. Atomic config swaps with last-known-good fallback  
 3. WebSocket-based control plane distribution
-4. Local resilience (health checks, rate limits, circuit breakers)
-5. Runtime comparison (Go stdlib vs Pingora/Rust async)
+4. Local resilience (health checks, circuit breakers, overload protection)
 
 Each milestone preserves the fundamental invariants while adding operational capability.
 
@@ -43,8 +42,7 @@ These invariants mirror patterns from production systems: Envoy operates from lo
 | **M1** ✅ | None (static) | Hardcoded in-memory routing | Zero operational complexity; zero config flexibility |
 | **M2** ✅ | File + hot-reload | Atomic swap on file change | Local config management; manual propagation to fleet |
 | **M3** ✅ | WebSocket broadcast | Receives CP updates; survives CP failure | Centralized config source; DP maintains local autonomy |
-| **M4** ⏳ | Health + rate limits | Local health checks, circuit breakers | Per-router resilience state; no cross-router coordination |
-| **M5** ⏳ | (Pingora comparison) | Async runtime (Tokio) vs goroutines | Memory efficiency vs implementation simplicity |
+| **M4** ✅ | Health + circuit breakers | Local resilience without coordination | Per-router state; fail-safe fallback routing |
 
 Each milestone isolates a specific layer of operational capability while preserving the core invariants. See [docs/milestones](docs/milestones/) for detailed architecture notes.
 
@@ -86,14 +84,11 @@ How routers behave when control plane is unavailable, slow, or serving invalid c
 **Operational observability**  
 What metadata enables debugging distributed routing decisions from logs alone. How to make routing decisions auditable without distributed tracing.
 
-**Runtime characteristics (M5)**  
-Comparing Go's goroutine-based concurrency model against Rust/Tokio async runtime. Memory allocation patterns, connection handling, and proxy throughput under different runtime models.
-
 This repository does not implement a production system. It makes the architectural patterns explicit and testable in isolation.
 
 ## Implementation Status
 
-**Current**: Milestone 3 complete. WebSocket-based control plane pushes config snapshots to data plane routers. Control plane watches a config file and broadcasts changes; data plane validates and applies atomically, tracking config source (file vs control_plane). Routers continue serving if control plane disconnects.
+**Current**: Milestone 4 complete. Stateless resilience mechanisms added to data plane: active health checks per endpoint, per-endpoint circuit breakers, and overload protection (concurrency limits, body size limits). All state is local and in-memory. Routers route to fallback placements when primary endpoints are unhealthy or circuits are open.
 
 **Routing model**: Two-level indirection (`routingKey → placementKey → endpoint`) with default fallback. Placement keys represent failure domains (dedicated cells, shared tiers). Unknown routing keys default to shared tier3; missing routing key header returns 400.
 
@@ -114,12 +109,15 @@ cmd/
 ├── control-plane/ # Control plane: WebSocket broadcast (M3)
 └── cell/          # Demo backend cells
 internal/
-├── config/        # Parsing, validation, atomic swap (M2/M3)
+├── config/        # Parsing, validation, atomic swap (M2/M3/M4)
 ├── routing/       # Routing decision logic + tests (M1)
-├── proxy/         # HTTP reverse proxy with streaming (M1)
+├── proxy/         # HTTP reverse proxy with resilience (M1/M4)
 ├── protocol/      # WebSocket message types (M3)
 ├── controlplane/  # CP server implementation (M3)
 ├── dataplane/     # DP client with reconnection (M3)
+├── health/        # Active health checking (M4)
+├── circuit/       # Circuit breaker implementation (M4)
+├── limits/        # Concurrency and size limits (M4)
 ├── debug/         # Debug endpoints (M2)
 └── logging/       # Structured JSON logging (M1)
 config/

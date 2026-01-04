@@ -1,6 +1,6 @@
 # Milestone 4: Stateless Resilience
 
-**Status:** 📋 Planned
+**Status:** ✅ Complete
 
 ## Goal
 
@@ -108,7 +108,3 @@ Request → Route → Circuit Breaker → Health Check → Semaphore → Proxy �
 - Concurrency limits protect router from overload
 - All state transitions logged and observable
 - Zero impact to fast path latency (p50 unchanged)
-
-## Next: Milestone 5
-
-Reimplement M1-M4 in Cloudflare Pingora to compare Go vs Rust edge proxy architectures.

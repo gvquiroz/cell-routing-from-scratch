@@ -118,6 +118,10 @@ Structured logs include control plane connection events:
 - Incremental/delta config updates (full snapshots only)
 - Multi-region control plane coordination
 - Authentication between CP and DP
+
+## Next: Milestone 4
+
+Add stateless resilience mechanisms: health checks detect unhealthy endpoints, circuit breakers prevent cascading failures, and concurrency limits protect against overload. All state remains local and in-memory.
 - Config rollback or versioned history
 - Heartbeat/ping-pong messages (connection failures detected via read timeout)
 - Gradual rollout or canary deployments

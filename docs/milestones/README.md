@@ -11,8 +11,7 @@ This progression mirrors how production edge systems evolve from static configur
 | [M1: Static Routing](milestone-1.md) | ✅ Complete | In-memory routing, streaming proxy | Zero operations, zero flexibility |
 | [M2: Atomic Config Reload](milestone-2.md) | ✅ Complete | File-based hot-reload with validation | Local config management, manual fleet updates |
 | [M3: Control Plane Distribution](milestone-3.md) | ✅ Complete | WebSocket push from centralized CP | Coordinated fleet config, data plane stays autonomous |
-| [M4: Local Resilience](milestone-4.md) | ⏳ Planned | Health checks, rate limits, circuit breakers | Per-router state, no cross-router coordination |
-| [M5: Runtime Comparison](milestone-5.md) | ⏳ Planned | Pingora/Rust async vs Go stdlib | Memory efficiency vs implementation simplicity |
+| [M4: Local Resilience](milestone-4.md) | ✅ Complete | Health checks, circuit breakers, overload protection | Per-router resilience state, no cross-router coordination |
 
 ## Architectural Progression
 
@@ -22,9 +21,7 @@ This progression mirrors how production edge systems evolve from static configur
 
 **M3** separates config source from config application. Control plane becomes authoritative source; data plane receives updates asynchronously. Data plane survives control plane failure indefinitely—routing continues with last-known-good config.
 
-**M4** adds per-router resilience without distributed coordination. Health checks mark unhealthy upstreams; rate limits protect individual routers; circuit breakers prevent cascading failures. All state remains local to each router.
-
-**M5** compares runtime characteristics. Same routing logic, different execution models: Go's goroutine-per-request vs Rust's async runtime. Demonstrates memory allocation patterns, connection handling, and proxy throughput under different concurrency models.
+**M4** adds per-router resilience without distributed coordination. Health checks detect unhealthy upstreams; circuit breakers prevent cascading failures; concurrency limits protect against overload. All state remains local to each router. Fallback routing ensures requests succeed even when primary placements fail.
 
 ## Design Principles
 
