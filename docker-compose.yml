@@ -1,4 +1,18 @@
 services:
+  control-plane:
+    build:
+      context: .
+      dockerfile: Dockerfile.control-plane
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
+      - CONFIG_PATH=/app/config/routing.json
+    volumes:
+      - ./config:/app/config
+    networks:
+      - cell-network
+
   router:
     build:
       context: .
@@ -7,10 +21,12 @@ services:
       - "8080:8080"
     environment:
       - PORT=8080
-      - CONFIG_PATH=/app/config/routing.json
+      - CONFIG_PATH=/app/config/dataplane-initial.json
+      - CONTROL_PLANE_URL=ws://control-plane:8081/connect
     volumes:
       - ./config:/app/config
     depends_on:
+      - control-plane
       - cell-tier1
       - cell-tier2
       - cell-tier3

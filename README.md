@@ -1,129 +1,143 @@
 # Cell Routing from Scratch
 
-An educational implementation of the ingress routing layer in a cell-based architecture. This repository explores the design space between control plane sophistication and data plane autonomy, with a focus on making architectural tradeoffs explicit.
+An educational implementation of cell-based ingress routing that makes control plane and data plane separation explicit. This repository demonstrates how production edge systems maintain local routing decisions while allowing centralized configuration distribution, and why that separation matters for large-scale reliability.
 
-## The Problem
+## Problem Statement
 
-Modern distributed systems isolate workloads into cells (dedicated tenant environments or shared tiers) to contain blast radius and enable independent scaling. The ingress layer must route incoming requests to the correct cell based on request metadata while maintaining strict operational invariants:
+Cell-based architectures isolate workloads into independent failure domains—dedicated tenant environments or shared capacity tiers. The ingress layer routes requests to cells based on request context (customer ID, tenant identifier, etc.) without introducing synchronous dependencies during request processing.
 
-1. **Routing decisions are local**: No synchronous dependency on a control plane during request processing
-2. **Config updates are asynchronous**: Control plane pushes updates; data plane applies them atomically
-3. **Failure isolation**: Data plane continues serving with last-known-good config if control plane is unavailable
+This constraint—local routing decisions with asynchronous config updates—appears in every production edge system: Envoy's xDS protocol, service mesh control planes, CDN edge nodes. The pattern is well-understood at scale but rarely demonstrated in isolation.
 
-These constraints appear in production systems (Envoy xDS, Linkerd, Istio, internal edge systems) but are rarely demonstrated in isolation. This repository implements them incrementally to make the tradeoffs explicit.
+This repository builds that pattern from first principles across five milestones:
 
-## Core Invariants
+1. Static routing with in-memory tables
+2. Atomic config swaps with last-known-good fallback  
+3. WebSocket-based control plane distribution
+4. Local resilience (health checks, rate limits, circuit breakers)
+5. Runtime comparison (Go stdlib vs Pingora/Rust async)
 
-- **Control plane never in hot path**: All routing decisions use in-memory state; no RPC to CP during request proxying
-- **Atomic config updates**: New routing tables are validated and swapped atomically; no partial application
-- **Graceful degradation**: Router survives CP downtime/restarts without dropping traffic
-- **Explainability**: Every response includes routing metadata (`X-Routed-To`, `X-Route-Reason`) for debugging
+Each milestone preserves the fundamental invariants while adding operational capability.
 
-## Architecture Progression
+## Architectural Invariants
 
-Each milestone introduces a new layer of control plane sophistication while preserving data plane autonomy:
+These constraints hold across all milestones:
 
-| Milestone | Control Plane | Data Plane Behavior | Key Tradeoff |
-|-----------|---------------|---------------------|--------------|
-| **M1** ✅ | Static (none) | Hardcoded in-memory routing | Zero operational complexity; zero flexibility |
-| **M2** ✅ | File + hot-reload | Atomic swap on file change | Local config; manual distribution |
-| **M3** | WebSocket push | Receives CP updates; survives CP outage | CP coordinates fleet; DP stays autonomous |
-| **M4** | Health state + limits | Local health checks, rate limits, circuit breakers | Per-router state; no global coordination |
-| **M5** | (Pingora reimpl) | Compare stdlib vs async runtime tradeoffs | Go simplicity vs Rust performance |
-
-[Full milestone specifications](docs/milestones/README.md)
-
-## Quick Start
-
-```bash
-# Start router + 4 demo cells
-docker compose up --build
-
-# Observe routing behavior
-curl -H "X-Routing-Key: visa" http://localhost:8080/    # → dedicated cell
-curl -H "X-Routing-Key: acme" http://localhost:8080/    # → shared tier1
-curl -H "X-Routing-Key: unknown" http://localhost:8080/ # → default tier3
-
-# Check current config (M2)
-curl http://localhost:8080/debug/config
-
-# Hot-reload test (M2)
-# Edit config/routing.json, wait 5-10 seconds, check /debug/config again
-
-# Each response includes routing decision headers
-# X-Routed-To: visa
-# X-Route-Reason: dedicated | tier | default
-
-# Automated test suite
-./test-routing.sh
-```
-
-**Structured logs** (router and cells):
-```bash
-docker compose logs -f router
-docker compose logs -f cell-visa
-```
-
-## What This Teaches
-
-**Control plane/data plane separation**  
-How to decouple routing logic from config distribution; why CP must never block request processing.
+**Control plane never in request path**  
+Routing decisions use only local, in-memory state. No RPC to a control plane during request processing. Config updates are asynchronous—data plane applies them when received, not when requested.
 
 **Atomic configuration updates**  
-Techniques for validating and swapping routing state without partial application or race conditions.
+New routing tables are validated before application. Swaps are atomic via `atomic.Value`; no partial state visible to concurrent requests. Invalid configs are rejected, previous config remains active.
 
-**Failure modes and degradation**  
-How routers behave when control plane is slow, unavailable, or serving invalid config.
+**Graceful degradation**  
+Data plane survives control plane downtime indefinitely. Routers operate with last-known-good config. Control plane unavailability does not impact request serving.
 
-**Resilience patterns (M4)**  
-When to use health checks vs circuit breakers; local vs distributed rate limiting tradeoffs.
+**Observable routing decisions**  
+Every response includes routing metadata (`X-Routed-To`, `X-Route-Reason`) sufficient to debug placement decisions from logs alone.
 
-**Proxy runtime tradeoffs (M5)**  
-Comparing Go's stdlib HTTP proxy (goroutines, GC) against Pingora's async runtime (Tokio, Rust ownership).
+These invariants mirror patterns from production systems: Envoy operates from local snapshots pushed via xDS; service mesh data planes maintain autonomy from their control planes; CDN edge nodes make routing decisions from locally-cached config.
 
-## Implementation Notes
+## Milestone Progression
 
-**Current (M1-M2)**: File-based configuration with hot-reload (5s polling). Atomic config swaps using `atomic.Value`; validation ensures consistency before applying updates. Falls back to last-known-good config on validation failure. Streaming reverse proxy in Go with no external dependencies.
+| Milestone | Control Plane | Data Plane Behavior | Architectural Tradeoff |
+|-----------|---------------|---------------------|------------------------|
+| **M1** ✅ | None (static) | Hardcoded in-memory routing | Zero operational complexity; zero config flexibility |
+| **M2** ✅ | File + hot-reload | Atomic swap on file change | Local config management; manual propagation to fleet |
+| **M3** ✅ | WebSocket broadcast | Receives CP updates; survives CP failure | Centralized config source; DP maintains local autonomy |
+| **M4** ⏳ | Health + rate limits | Local health checks, circuit breakers | Per-router resilience state; no cross-router coordination |
+| **M5** ⏳ | (Pingora comparison) | Async runtime (Tokio) vs goroutines | Memory efficiency vs implementation simplicity |
 
-**Routing model**: Two-level lookup (`routingKey → placementKey → endpoint`) with default fallback. Unknown routing keys map to `tier3`; missing header returns 400.
+Each milestone isolates a specific layer of operational capability while preserving the core invariants. See [docs/milestones](docs/milestones/) for detailed architecture notes.
 
-**Config hot-reload (M2)**: Polls `config/routing.json` every 5 seconds, validates changes, atomically swaps routing tables. Invalid configs are rejected with clear error logs while router continues serving with previous valid config.
-
-**Observability**: Structured JSON logs include request ID, routing decision, timing. Each cell logs incoming requests with forwarded metadata. Debug endpoint at `/debug/config` shows current version and last reload timestamp.
-
-[Milestone 1 specification](docs/milestones/milestone-1.md)  
-[Milestone 2 specification](docs/milestones/milestone-2.md)
-
-## Project Structure
-
-```
-cmd/router/       # Data plane: routing + proxy
-cmd/cell/         # Demo backend cells
-internal/
-├── config/       # Config parsing, validation, hot-reload (M2)
-├── routing/      # Routing decision logic + tests
-├── proxy/        # HTTP reverse proxy with streaming
-├── debug/        # Debug endpoints (M2)
-└── logging/      # Structured JSON logging
-config/           # Sample routing configuration (M2)
-docs/milestones/  # Architecture specifications per milestone
-```
-
-## Development
+## Running Locally
 
 ```bash
-go test ./...                          # Run unit tests
-go run cmd/router/main.go              # Run router locally
-CELL_NAME=tier1 PORT=9001 go run cmd/cell/main.go &  # Run cell
+# Start control plane + router + 4 demo cells
+docker compose up --build
+
+# Verify routing (each response includes X-Routed-To, X-Route-Reason headers)
+curl -H "X-Routing-Key: visa" http://localhost:8080/    # dedicated cell
+curl -H "X-Routing-Key: acme" http://localhost:8080/    # shared tier1
+curl -H "X-Routing-Key: unknown" http://localhost:8080/ # default tier3
+
+# Check config source and version
+curl http://localhost:8080/debug/config
+
+# Test config propagation: edit config/routing.json, wait ~5 seconds
+# Control plane detects change, broadcasts to routers
+# Check /debug/config to confirm version update
+
+# Run test suite
+go test ./...
 ```
 
-## Non-Goals
+Router logs and cell logs available via `docker compose logs -f router` and `docker compose logs -f cell-visa`.
 
-This is not a production framework, API gateway, or deployable service mesh. It is an educational artifact designed to make architectural patterns and tradeoffs explicit.
+## What This Demonstrates
 
-- No authentication/authorization (assumes trusted upstream)
-- No metrics/tracing integration (logs only)
-- No Kubernetes operators or declarative config
-- No distributed coordination (per-router state only)
+**Control plane / data plane separation**  
+Why routing decisions must be local (latency, blast radius, availability). How asynchronous config distribution maintains data plane autonomy. The tradeoff between centralized coordination and local resilience.
 
-Future milestones add operational complexity (hot reload, CP integration, health checks) but maintain focus on architecture over features.
+**Atomic state transitions**  
+Techniques for validating and applying configuration without exposing partial state to concurrent requests. Why last-known-good config matters more than newest config.
+
+**Failure domain isolation**  
+How routers behave when control plane is unavailable, slow, or serving invalid config. Why graceful degradation requires local decision-making capability.
+
+**Operational observability**  
+What metadata enables debugging distributed routing decisions from logs alone. How to make routing decisions auditable without distributed tracing.
+
+**Runtime characteristics (M5)**  
+Comparing Go's goroutine-based concurrency model against Rust/Tokio async runtime. Memory allocation patterns, connection handling, and proxy throughput under different runtime models.
+
+This repository does not implement a production system. It makes the architectural patterns explicit and testable in isolation.
+
+## Implementation Status
+
+**Current**: Milestone 3 complete. WebSocket-based control plane pushes config snapshots to data plane routers. Control plane watches a config file and broadcasts changes; data plane validates and applies atomically, tracking config source (file vs control_plane). Routers continue serving if control plane disconnects.
+
+**Routing model**: Two-level indirection (`routingKey → placementKey → endpoint`) with default fallback. Placement keys represent failure domains (dedicated cells, shared tiers). Unknown routing keys default to shared tier3; missing routing key header returns 400.
+
+**Configuration separation**:
+- Control plane: watches `config/routing.json` (authoritative source)
+- Data plane: bootstraps from `config/dataplane-initial.json`, immediately replaced by CP push
+- File-only mode: data plane watches `routing.json` directly (no CP)
+
+**Observability**: Structured JSON logs include request_id, routing decision, timing. Debug endpoint `/debug/config` shows current version, config source, last reload timestamp. Routing decision exposed in response headers for offline analysis.
+
+See [milestone specifications](docs/milestones/) for architectural details and failure mode analysis.
+
+## Repository Structure
+
+```
+cmd/
+├── router/        # Data plane: routing + proxy + CP client (M3)
+├── control-plane/ # Control plane: WebSocket broadcast (M3)
+└── cell/          # Demo backend cells
+internal/
+├── config/        # Parsing, validation, atomic swap (M2/M3)
+├── routing/       # Routing decision logic + tests (M1)
+├── proxy/         # HTTP reverse proxy with streaming (M1)
+├── protocol/      # WebSocket message types (M3)
+├── controlplane/  # CP server implementation (M3)
+├── dataplane/     # DP client with reconnection (M3)
+├── debug/         # Debug endpoints (M2)
+└── logging/       # Structured JSON logging (M1)
+config/
+├── routing.json           # Control plane config source
+└── dataplane-initial.json # Data plane bootstrap config
+docs/milestones/           # Architecture specifications per milestone
+```
+
+Each milestone's implementation is documented in `docs/milestones/milestone-N.md` with architectural intent, invariants preserved, and failure modes considered.
+
+## Explicit Non-Goals
+
+This is not a production framework, API gateway, or service mesh. It is an educational artifact that makes architectural patterns testable.
+
+- No authentication or authorization (assumes trusted ingress)
+- No metrics beyond structured logs
+- No Kubernetes integration or declarative operators
+- No distributed coordination or consensus protocols
+- No request tracing or distributed debugging tools
+
+Milestones add operational complexity (config reload, control plane distribution, local resilience) while maintaining focus on core architectural patterns over feature completeness.

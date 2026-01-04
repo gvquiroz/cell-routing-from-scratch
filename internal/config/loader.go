@@ -10,10 +10,19 @@ import (
 	"time"
 )
 
+// ConfigSource indicates where the config came from
+type ConfigSource string
+
+const (
+	SourceFile         ConfigSource = "file"
+	SourceControlPlane ConfigSource = "control_plane"
+)
+
 // Loader manages hot-reloading of routing configuration
 type Loader struct {
 	configPath   string
 	activeConfig atomic.Value // stores *Config
+	configSource atomic.Value // stores ConfigSource
 	lastChecksum atomic.Value // stores string
 	lastReload   atomic.Value // stores time.Time
 	pollInterval time.Duration
@@ -47,11 +56,29 @@ func (l *Loader) LoadInitial() error {
 	}
 
 	l.activeConfig.Store(cfg)
+	l.configSource.Store(SourceFile)
 	l.lastChecksum.Store(checksum)
 	l.lastReload.Store(time.Now())
 
 	log.Printf("Loaded initial config version: %s", cfg.Version)
 	return nil
+}
+
+// ApplyConfig atomically applies a config from the control plane
+func (l *Loader) ApplyConfig(cfg *Config) error {
+	l.activeConfig.Store(cfg)
+	l.configSource.Store(SourceControlPlane)
+	l.lastReload.Store(time.Now())
+	return nil
+}
+
+// GetConfigSource returns the source of the current config
+func (l *Loader) GetConfigSource() interface{} {
+	v := l.configSource.Load()
+	if v == nil {
+		return SourceFile
+	}
+	return v.(ConfigSource)
 }
 
 // GetConfig returns the current active config (atomic read)
@@ -142,6 +169,7 @@ func (l *Loader) tryReload() {
 
 	// Atomically swap to new config
 	l.activeConfig.Store(cfg)
+	l.configSource.Store(SourceFile)
 	l.lastChecksum.Store(currentChecksum)
 	l.lastReload.Store(time.Now())
 

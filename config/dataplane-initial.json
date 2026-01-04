@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "routingTable": {
+    "acme": "tier1",
+    "globex": "tier2",
+    "initech": "tier3",
+    "visa": "visa"
+  },
+  "cellEndpoints": {
+    "tier1": "http://cell-tier1:9001",
+    "tier2": "http://cell-tier2:9002",
+    "tier3": "http://cell-tier3:9003",
+    "visa": "http://cell-visa:9004"
+  },
+  "defaultPlacement": "tier3"
+}

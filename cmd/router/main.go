@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gvquiroz/cell-routing-from-scratch/internal/config"
+	"github.com/gvquiroz/cell-routing-from-scratch/internal/dataplane"
 	"github.com/gvquiroz/cell-routing-from-scratch/internal/debug"
 	"github.com/gvquiroz/cell-routing-from-scratch/internal/logging"
 	"github.com/gvquiroz/cell-routing-from-scratch/internal/proxy"
@@ -20,8 +21,17 @@ func main() {
 	// Initialize logger
 	logger := logging.NewLogger()
 
-	// Load configuration from file
-	configPath := getEnv("CONFIG_PATH", "config/routing.json")
+	// Determine config path based on mode
+	cpURL := os.Getenv("CONTROL_PLANE_URL")
+	var configPath string
+	if cpURL != "" {
+		// CP mode: use initial config only (will be replaced by CP)
+		configPath = getEnv("CONFIG_PATH", "config/dataplane-initial.json")
+	} else {
+		// File-only mode: use main config with hot-reload
+		configPath = getEnv("CONFIG_PATH", "config/routing.json")
+	}
+
 	configLoader := config.NewLoader(configPath, 5*time.Second)
 
 	// Load initial config (fail fast if invalid)
@@ -29,9 +39,19 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Start hot-reload loop
-	configLoader.StartReloadLoop()
-	defer configLoader.Stop()
+	// Connect to control plane if configured
+	if cpURL != "" {
+		// CP mode: only accept updates from control plane
+		dpClient := dataplane.NewClient(cpURL, configLoader)
+		dpClient.Start()
+		defer dpClient.Stop()
+		log.Printf("Connected to control plane at %s - config updates via CP only", cpURL)
+	} else {
+		// File-only mode: watch for file changes
+		configLoader.StartReloadLoop()
+		defer configLoader.Stop()
+		log.Println("No control plane configured, using file-based config with hot-reload")
+	}
 
 	// Create router with config loader
 	router := routing.NewRouter(configLoader)

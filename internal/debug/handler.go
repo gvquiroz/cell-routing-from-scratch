@@ -9,6 +9,7 @@ import (
 // ConfigProvider provides access to config metadata
 type ConfigProvider interface {
 	GetConfigVersion() string
+	GetConfigSource() interface{}
 	LastReloadTime() time.Time
 }
 
@@ -27,10 +28,12 @@ func NewHandler(configProvider ConfigProvider) *Handler {
 // ServeHTTP handles /debug/config requests
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	version := h.configProvider.GetConfigVersion()
+	source := h.configProvider.GetConfigSource()
 	lastReload := h.configProvider.LastReloadTime()
 
 	response := map[string]interface{}{
 		"version":        version,
+		"source":         source,
 		"last_reload_at": lastReload.Format(time.RFC3339),
 	}
 

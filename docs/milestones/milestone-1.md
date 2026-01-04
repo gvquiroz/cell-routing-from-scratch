@@ -2,141 +2,76 @@
 
 **Status:** ✅ Complete
 
-## Goal
+## Architectural Intent
 
-Implement a minimal but production-ready reverse proxy that routes requests to cells based on a trusted header. Routing is deterministic, in-memory, and requires no control plane.
+Establish the baseline: routing decisions use only local, in-memory state. No external dependencies during request processing. Demonstrate that cell-based routing is conceptually straightforward—a two-level map lookup with a default fallback—but requires careful handling of streaming proxies, connection pooling, and observable decision-making.
 
-## Architecture
+## Core Design
 
-```
-┌─────────────┐
-│   Client    │
-└──────┬──────┘
-       │ X-Routing-Key: acme
-       ▼
-┌─────────────────────────────┐
-│  Router (Port 8080)         │
-│  ┌───────────────────────┐  │
-│  │ routingTable          │  │
-│  │ "acme" → "tier1"      │  │
-│  │ "globex" → "tier2"    │  │
-│  │ "initech" → "tier3"   │  │
-│  │ "visa" → "visa"       │  │
-│  └───────────────────────┘  │
-│  ┌───────────────────────┐  │
-│  │ cellEndpoints         │  │
-│  │ "tier1" → cell-tier1  │  │
-│  │ "tier2" → cell-tier2  │  │
-│  │ "tier3" → cell-tier3  │  │
-│  │ "visa" → cell-visa    │  │
-│  └───────────────────────┘  │
-└──────────┬──────────────────┘
-           │
-           ▼
-    ┌──────────────┐
-    │ Cell: tier1  │
-    │ Port: 9001   │
-    └──────────────┘
-```
+Routing is deterministic and requires no coordination:
 
-## Routing Logic
+1. Extract `X-Routing-Key` from request header (customer ID, tenant identifier, etc.)
+2. Map routing key → placement key (e.g., "acme" → "tier1")
+3. Map placement key → endpoint URL
+4. Proxy request with original method, path, query, body (streaming)
+5. Return response with routing decision headers for observability
 
-1. **Extract** `X-Routing-Key` from request header (required)
-2. **Lookup** `routingKey → placementKey` (e.g., "acme" → "tier1")
-3. **Default** if routing key unknown → "tier3"
-4. **Lookup** `placementKey → endpointURL`
-5. **Proxy** request to endpoint with:
-   - Original method, path, query, body (streaming)
-   - Added: `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Request-Id`
-6. **Return** response with explainability headers:
-   - `X-Routed-To`: placement key used
-   - `X-Route-Reason`: `dedicated` | `tier` | `default`
+**Placement model**: Routing keys map to failure domains (placements). A placement is either:
+- Dedicated cell (single-tenant, "visa")
+- Shared tier (multi-tenant, "tier1", "tier2", "tier3")
 
-### Route Reason Logic
+Unknown routing keys default to "tier3" (catch-all shared tier). Missing routing key header returns 400 Bad Request.
 
-- `dedicated` - Placement is not tier1/tier2/tier3 (e.g., "visa")
-- `tier` - Placement is tier1/tier2/tier3 and routing key was found
-- `default` - Routing key was unknown, defaulted to tier3
+## Invariants Established
 
-### Error Handling
+**Local decisions only**  
+No RPC, no database lookups, no external calls during routing. Routing tables are immutable after initialization—no locking required for concurrent reads.
 
-- Missing `X-Routing-Key` header → **400 Bad Request**
-- No endpoint for placement → **500 Internal Server Error**
-- Upstream unreachable → **502 Bad Gateway**
+**Streaming proxy**  
+Request and response bodies are streamed via `io.Copy`, not buffered. Large payloads flow through the proxy without memory exhaustion.
 
-## Implementation
+**Observable routing**  
+Every response includes `X-Routed-To` (placement used) and `X-Route-Reason` (dedicated/tier/default). Sufficient metadata for debugging routing decisions from logs alone.
 
-### Package Structure
+**Connection pooling**  
+Configured `http.Transport` with reasonable timeouts (5s dial, 10s response header, 30s total request, 90s idle). Connection reuse for upstream cells.
 
-```
-internal/
-├── routing/
-│   ├── router.go          # Core routing decision logic
-│   └── router_test.go     # Unit tests (8 tests, all passing)
-├── proxy/
-│   └── handler.go         # HTTP proxy with streaming
-└── logging/
-    └── logger.go          # Structured JSON logging
-```
+## Implementation Approach
 
-### Key Design Decisions
+Routing logic in `internal/routing/router.go`:
+- Two maps: `routingTable` (key→placement) and `cellEndpoints` (placement→URL)
+- Maps are immutable post-initialization (no concurrent write concerns)
+- Default fallback: unknown keys map to "tier3"
 
-1. **Immutable Maps**: Routing tables are read-only after initialization → no locking needed for concurrent requests
-2. **Streaming Proxy**: Uses `io.Copy` to avoid buffering entire request/response bodies
-3. **Connection Pooling**: Configured `http.Transport` with reasonable timeouts:
-   - Dial: 5s
-   - TLS handshake: 5s
-   - Response header: 10s
-   - Request: 30s
-   - Idle conn: 90s
-4. **Structured Logging**: JSON to stdout with request_id, timing, routing decisions
-5. **Standard Library**: No external dependencies beyond Go stdlib
+Proxy logic in `internal/proxy/handler.go`:
+- Standard library `http.Transport` and `http.Request`
+- Preserves original method, path, query, headers, body
+- Adds `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Request-Id`
+- Streams via `io.Copy` (no buffering)
 
-## Demo Environment
+Structured logging in `internal/logging/logger.go`:
+- JSON to stdout
+- Includes: request_id, routing_key, placement_key, route_reason, duration_ms, status_code
 
-Docker Compose orchestrates:
-- 1x router (exposed on :8080)
-- 4x demo cells (tier1, tier2, tier3, visa on internal network)
+## Failure Modes
 
-Each cell echoes its identity and key request metadata.
+| Scenario | Behavior | Rationale |
+|----------|----------|-----------|
+| Missing `X-Routing-Key` header | 400 Bad Request | Routing key is required context; cannot route without it |
+| Unknown routing key | Route to tier3 (default) | Graceful degradation; unknown customers get shared capacity |
+| No endpoint for placement | 500 Internal Server Error | Config error; should not occur in valid config |
+| Upstream unreachable | 502 Bad Gateway | Network failure; client should retry |
+| Upstream slow | Timeout after 30s | Prevents resource exhaustion; client sees 504 |
 
 ## Testing
 
-### Unit Tests
-```bash
-go test ./internal/routing
-```
+**Unit tests** (`internal/routing/router_test.go`): 8 test cases covering dedicated routing, tier routing, default fallback, and error conditions. All tests use in-memory config; no external dependencies.
 
-8 test cases covering:
-- Dedicated routing (visa)
-- Tier routing (tier1, tier2, tier3)
-- Default fallback (unknown key)
-- Missing endpoint error
+**Integration test** (`test-routing.sh`): Automated script verifying all routing paths, response headers, and status codes against live demo environment.
 
-### Integration Tests
-```bash
-./test-routing.sh
-```
+**Demo environment**: Docker Compose orchestrates 1 router + 4 demo cells (tier1, tier2, tier3, visa). Each cell echoes its identity and request metadata.
 
-Automated script that verifies:
-- All routing paths
-- Response headers
-- Status codes
-
-### Manual Testing
-```bash
-# Valid routing key
-curl -H "X-Routing-Key: visa" http://localhost:8080/
-
-# Unknown key → defaults to tier3
-curl -H "X-Routing-Key: unknown" http://localhost:8080/
-
-# Missing header → 400 error
-curl http://localhost:8080/
-```
-
-## Sample Logs
-
+Sample log output:
 ```json
 {
   "timestamp": "2026-01-03T19:02:22Z",
@@ -152,18 +87,15 @@ curl http://localhost:8080/
 }
 ```
 
-## Out of Scope (Future Milestones)
+## Deferred to Future Milestones
 
-- ❌ Config reload (M2)
-- ❌ Control plane integration (M3)
-- ❌ Health checks (M4)
-- ❌ Rate limiting (M4)
-- ❌ Circuit breakers (M4)
-- ❌ Retries (M4)
-- ❌ Authentication
-- ❌ Metrics/monitoring
-- ❌ High availability
+- Configuration reload (M2): routing tables are hardcoded at startup
+- Control plane (M3): no centralized config distribution
+- Health checks (M4): no upstream health awareness
+- Rate limiting (M4): no per-customer or per-tier limits
+- Circuit breakers (M4): no automatic failure isolation
+- Retries (M4): no automatic retry logic
+- Authentication: routing key is trusted input
+- Metrics: structured logs only
 
-## Next: Milestone 2
-
-Hot-reload configuration from file with atomic swap and last-known-good fallback.
+This milestone establishes the invariant: routing decisions use only local state. All future milestones preserve this invariant while adding operational capabilities.

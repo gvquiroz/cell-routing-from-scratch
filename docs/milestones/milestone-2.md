@@ -1,202 +1,102 @@
-# Milestone 2: Hot-Reload Configuration
+# Milestone 2: Atomic Config Reload
 
 **Status:** ✅ Complete
 
-## Goal
+## Architectural Intent
 
-Load routing configuration from a file and support hot-reload without downtime. The router:
-- Reads routing tables from a JSON config file
-- Validates configuration before applying
-- Atomically swaps to new config using `atomic.Value`
-- Falls back to last-known-good config on validation failure
-- Continues serving with existing config if reload fails
+Introduce configuration mutability while preserving the invariant that routing decisions use only local state. Routing tables become hot-reloadable from a file, but updates must be atomic—concurrent requests never observe partial configuration changes. Invalid configs must be rejected without disrupting ongoing request processing.
 
-## Architecture
+This milestone demonstrates the pattern: **last-known-good config is more valuable than newest config**. If a new config fails validation, the router continues serving with the previous valid config.
 
-```
-┌─────────────────┐
-│  Config File    │
-│  routing.json   │
-└────────┬────────┘
-         │ (polled every 5s, checksum-based)
-         ▼
-┌─────────────────────────────┐
-│  Config Loader              │
-│  - LoadFromFile()           │
-│  - Validate()               │
-│  - atomic.Value swap        │
-└────────┬────────────────────┘
-         │ (atomic read)
-         ▼
-┌─────────────────────────────┐
-│  Router                     │
-│  (uses ConfigProvider)      │
-└─────────────────────────────┘
-```
+## Invariants Preserved
 
-## Config Format
+**Control plane never in request path**  
+Config reload happens asynchronously in a background goroutine. Routing decisions read config via `atomic.Value.Load()`—no locks, no blocking.
 
+**Atomic config updates**  
+New config is validated before application. If valid, swapped atomically. Concurrent requests see either old config or new config, never a mix. Go's `atomic.Value` provides memory ordering guarantees.
+
+**Graceful degradation**  
+Invalid config is rejected with detailed error logs. Router continues serving with previous config. No request failures during attempted config updates.
+
+## Configuration Format
+
+JSON at `config/routing.json`:
 ```json
 {
   "version": "1.0.0",
   "routingTable": {
     "acme": "tier1",
-    "globex": "tier2",
-    "initech": "tier3",
     "visa": "visa"
   },
   "cellEndpoints": {
     "tier1": "http://cell-tier1:9001",
-    "tier2": "http://cell-tier2:9002",
-    "tier3": "http://cell-tier3:9003",
     "visa": "http://cell-visa:9004"
   },
   "defaultPlacement": "tier3"
 }
 ```
 
-Location: `config/routing.json`
-
-## Implementation
-
-### Package Structure
-
-```
-internal/
-├── config/
-│   ├── config.go         # Config struct, LoadFromFile, Validate
-│   ├── config_test.go    # Parsing and validation tests
-│   ├── loader.go         # Hot-reload logic with atomic.Value
-│   └── loader_test.go    # Reload and last-known-good tests
-├── debug/
-│   └── handler.go        # Debug endpoint handler
-└── routing/
-    └── router.go         # Updated to use ConfigProvider interface
-```
-
-### Core Invariants
-
-1. **Atomic reads**: Router reads config via `ConfigProvider` interface methods
-2. **Immutable configs**: Each `Config` struct is immutable after creation
-3. **No blocking**: Config reads never block requests
-4. **Last-known-good**: Invalid configs are rejected, previous config stays active
-5. **Checksum-based reload**: Only reloads when file SHA256 changes
-
-### Validation Rules
-
-- `version` must be non-empty
+**Validation rules**:
+- `version` must be non-empty (opaque string for tracking)
 - `defaultPlacement` must exist in `cellEndpoints`
-- All placements referenced in `routingTable` must exist in `cellEndpoints`
-- All endpoint URLs must be valid (parseable by `url.Parse`)
+- All placements in `routingTable` must exist in `cellEndpoints`
+- All endpoint URLs must parse as valid HTTP/HTTPS URLs
 
-### Hot Reload Mechanism
+## Implementation Approach
 
-1. Background goroutine polls config file every 5 seconds
-2. Computes SHA256 checksum of file content
-3. If checksum changed:
-   - Load and parse config
-   - Validate thoroughly
-   - If valid: atomically swap via `atomic.Value.Store()`
-   - If invalid: log error, keep current config
-4. Router reads config atomically on each request
+**Config loader** (`internal/config/loader.go`):
+- Background goroutine polls file every 5 seconds
+- Computes SHA256 checksum to detect changes (avoids parsing unchanged files)
+- On change: load, parse, validate, swap via `atomic.Value.Store()`
+- On validation failure: log error, keep current config
 
-### Debug Endpoint
+**Router interface** (`internal/routing/router.go`):
+- Router depends on `ConfigProvider` interface, not concrete `Loader` type
+- Reads config via `GetRoutingTable()`, `GetCellEndpoints()`, `GetDefaultPlacement()`
+- Each read is an atomic operation; config snapshot is consistent
 
-`GET /debug/config` returns:
-```json
-{
-  "version": "1.0.0",
-  "last_reload_at": "2026-01-03T20:45:12Z"
-}
-```
-
-### Startup Behavior
-
-- **Fail fast**: If initial config is missing or invalid, router exits with error
+**Startup behavior**:
+- Fail fast if initial config is missing or invalid
+- No hardcoded fallback; config file is required
 - Environment variable: `CONFIG_PATH` (default: `config/routing.json`)
-- No fallback to hardcoded config (enforces config-driven approach)
-
-## Testing
-
-### Unit Tests
-```bash
-go test ./internal/config -v
-```
-
-12 test cases covering:
-- Config parsing (valid, invalid JSON, missing file)
-- Validation (missing version, invalid URLs, unknown placements)
-- Hot reload (successful reload, keeps last-known-good on failure)
-- Atomic swap behavior
-
-All Milestone 1 routing tests continue to pass unchanged.
-
-### Manual Testing
-
-1. Start services:
-```bash
-docker-compose up --build
-```
-
-2. Verify initial config:
-```bash
-curl http://localhost:8080/debug/config
-```
-
-3. Test routing with initial config:
-```bash
-curl -H "X-Routing-Key: visa" http://localhost:8080/
-```
-
-4. Update config file:
-```bash
-# Edit config/routing.json to add new routing key
-# or change endpoint URL
-```
-
-5. Wait 5-10 seconds, verify reload:
-```bash
-curl http://localhost:8080/debug/config
-# Check that last_reload_at timestamp updated
-```
-
-6. Test with invalid config (should keep last-known-good):
-```bash
-# Edit config/routing.json to have empty version
-# Check logs - should see "Config reload failed: validation error"
-# Requests continue working with old config
-```
 
 ## Failure Modes
 
-| Scenario | Behavior |
-|----------|----------|
-| Initial config missing | Router exits with error (fail fast) |
-| Initial config invalid | Router exits with error (fail fast) |
-| Hot reload: file unreadable | Log error, keep current config |
-| Hot reload: invalid JSON | Log error, keep current config |
-| Hot reload: validation fails | Log error, keep current config |
-| Hot reload: partial write | Checksum mismatch prevents load |
+| Scenario | Behavior | Rationale |
+|----------|----------|-----------|
+| Initial config missing | Router exits (fail fast) | Cannot serve without routing config |
+| Initial config invalid | Router exits (fail fast) | Prefer visibility over degraded state at startup |
+| Reload: file unreadable | Log error, keep current config | Transient filesystem issue should not break routing |
+| Reload: invalid JSON | Log error, keep current config | Malformed file should not disrupt serving |
+| Reload: validation fails | Log error, keep current config | Invalid config should not replace valid config |
+| Reload: partial file write | Checksum mismatch prevents load | Avoids loading incomplete config |
 
-## Success Criteria (All Met)
+The pattern: **fail fast on startup, gracefully degrade during runtime**. Initial config errors are unrecoverable; runtime config errors are recoverable.
 
-- ✅ Config changes applied within 5-10 seconds (polling interval)
-- ✅ Zero request failures during reload (atomic swap)
-- ✅ Invalid config rejected with clear error messages in logs
-- ✅ Existing config preserved on validation failure
-- ✅ No external dependencies (standard library only)
-- ✅ All Milestone 1 tests continue passing
+## Testing
 
-## Out of Scope (Future Milestones)
+**Unit tests** (`internal/config/config_test.go`, `loader_test.go`): 13 test cases covering parsing, validation, hot-reload, last-known-good behavior. Tests verify that invalid configs are rejected and previous config remains active.
 
-- ❌ fsnotify/inotify (using polling for simplicity)
-- ❌ SIGHUP signal handling
-- ❌ Config versioning/history
-- ❌ Gradual rollout (instant atomic swap)
-- ❌ Config hot-reload via HTTP API
-- ❌ Control plane integration (M3)
+**Manual verification**:
+1. Start router: `docker compose up --build`
+2. Check initial config: `curl http://localhost:8080/debug/config`
+3. Edit `config/routing.json` (add routing key, change endpoint URL)
+4. Wait 5-10 seconds, check `/debug/config` for updated `last_reload_at`
+5. Break config (empty version field), verify logs show validation error and routing continues
 
-## Next: Milestone 3
+**Debug endpoint**: `GET /debug/config` returns current version and last reload timestamp. Sufficient metadata to verify config propagation without inspecting router internals.
+
+## Deferred to Future Milestones
+
+- File watching via inotify/fsnotify (using polling for simplicity)
+- SIGHUP signal handling for explicit reload
+- Config versioning or rollback history
+- Gradual rollout or canary deployments
+- HTTP API for config updates
+- Centralized config distribution (M3)
+
+This milestone adds configuration flexibility while maintaining all M1 invariants. Routing decisions remain local; config reload is asynchronous; invalid configs cannot break routing.
 
 Add control plane for centralized configuration management and dynamic service discovery.
 
