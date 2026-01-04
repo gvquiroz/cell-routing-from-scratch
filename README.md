@@ -37,14 +37,35 @@ These invariants mirror patterns from production systems: Envoy operates from lo
 
 ## Milestone Progression
 
-| Milestone | Control Plane | Data Plane Behavior | Architectural Tradeoff |
-|-----------|---------------|---------------------|------------------------|
-| **M1** ✅ | None (static) | Hardcoded in-memory routing | Zero operational complexity; zero config flexibility |
-| **M2** ✅ | File + hot-reload | Atomic swap on file change | Local config management; manual propagation to fleet |
-| **M3** ✅ | WebSocket broadcast | Receives CP updates; survives CP failure | Centralized config source; DP maintains local autonomy |
-| **M4** ✅ | Health + circuit breakers | Local resilience without coordination | Per-router state; fail-safe fallback routing |
+This progression mirrors how production edge systems evolve from static configuration to centralized orchestration:
 
-Each milestone isolates a specific layer of operational capability while preserving the core invariants. See [docs/milestones](docs/milestones/) for detailed architecture notes.
+| Milestone | Status | Capability Added | Architectural Tradeoff |
+|-----------|--------|------------------|------------------------|
+| **[M1: Static Routing](docs/milestones/milestone-1.md)** | ✅ Complete | In-memory routing, streaming proxy | Zero operational complexity; zero config flexibility |
+| **[M2: Atomic Config Reload](docs/milestones/milestone-2.md)** | ✅ Complete | File-based hot-reload with validation | Local config management; manual propagation to fleet |
+| **[M3: Control Plane Distribution](docs/milestones/milestone-3.md)** | ✅ Complete | WebSocket push from centralized CP | Centralized config source; DP maintains local autonomy |
+| **[M4: Local Resilience](docs/milestones/milestone-4.md)** | ✅ Complete | Health checks, circuit breakers, overload protection | Per-router resilience state; no cross-router coordination |
+
+### Architectural Progression
+
+**M1** establishes the baseline: routing decisions use only local, in-memory state. No external dependencies during request processing.
+
+**M2** introduces configuration flexibility via atomic swaps. Routing tables become mutable, but updates must be validated before application. Last-known-good config prevents invalid updates from breaking routing.
+
+**M3** separates config source from config application. Control plane becomes authoritative source; data plane receives updates asynchronously. Data plane survives control plane failure indefinitely—routing continues with last-known-good config.
+
+**M4** adds per-router resilience without distributed coordination. Health checks detect unhealthy upstreams; circuit breakers prevent cascading failures; concurrency limits protect against overload. All state remains local to each router. Fallback routing ensures requests succeed even when primary placements fail.
+
+### Design Principles
+
+Each milestone:
+- Preserves all invariants from previous milestones
+- Adds one new operational capability
+- Documents the architectural tradeoff introduced
+- Includes failure mode analysis
+- Remains independently runnable and testable
+
+Each milestone's implementation is documented in `docs/milestones/milestone-N.md` with architectural intent, invariants preserved, failure modes considered, and implementation approach. These documents are structured as design notes focused on architectural reasoning and tradeoffs.
 
 ## Running Locally
 
@@ -98,8 +119,6 @@ This repository does not implement a production system. It makes the architectur
 - File-only mode: data plane watches `routing.json` directly (no CP)
 
 **Observability**: Structured JSON logs include request_id, routing decision, timing. Debug endpoint `/debug/config` shows current version, config source, last reload timestamp. Routing decision exposed in response headers for offline analysis.
-
-See [milestone specifications](docs/milestones/) for architectural details and failure mode analysis.
 
 ## Repository Structure
 
