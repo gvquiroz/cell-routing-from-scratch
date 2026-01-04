@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -82,10 +85,39 @@ func main() {
 		})
 	})
 
-	log.Printf("Cell '%s' starting on port %s", cellName, port)
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
-		log.Fatalf("Cell server failed: %v", err)
+	// Configure HTTP server
+	server := &http.Server{
+		Addr:         ":" + port,
+		Handler:      http.DefaultServeMux,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
+
+	// Start server in goroutine
+	go func() {
+		log.Printf("Cell '%s' starting on port %s", cellName, port)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Cell server failed: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Printf("Cell '%s' shutting down...", cellName)
+
+	// Graceful shutdown with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Printf("Cell forced to shutdown: %v", err)
+	}
+
+	log.Printf("Cell '%s' stopped", cellName)
 }
 
 func extractHeaders(r *http.Request) map[string]string {
