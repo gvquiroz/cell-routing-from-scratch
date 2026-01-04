@@ -2,7 +2,7 @@
 
 ## Motivation
 
-The baseline router enforces **concurrency limits** (max N requests per placement) but not **rate limits** (max N requests per second per routing key). Concurrency limits protect the router from saturation; rate limits protect upstreams from individual tenant overload.
+The baseline router enforces **concurrency limits** (max N requests per placement) but not **rate limits** (max N requests per second per routing key). Concurrency limits protect the router from saturation, rate limits protect upstreams from individual tenant overload.
 
 This annex explores why rate limiting introduces complexity, what design options exist, and where enforcement boundaries matter.
 

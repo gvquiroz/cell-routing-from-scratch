@@ -36,12 +36,6 @@ Pingora's abstractions (peer selection, load balancing modules, health check sub
 
 **TLS**: Baseline router uses `http.Transport` TLS config. Pingora's TLS handling is lower-level (BoringSSL bindings). Client cert validation, ALPN, and session resumption are configurable but require explicit setup.
 
-## Why This Is a Comparison, Not a Rewrite
-
-The educational value of the baseline router is its simplicity: standard library, minimal abstractions, ~1000 lines of routing logic. Pingora improves performance (memory, latency, throughput) but adds complexity (async runtime, Rust ownership, framework APIs).
-
-This annex documents how to **think about** porting the router's semantics to Pingora, not how to **execute** that port. Readers interested in edge proxy tradeoffs can compare the two implementations without building both.
-
 ## TODO / Open Questions
 
 - **Benchmark comparison**: Latency (p50, p99) and memory usage under load. Go vs Pingora at 10K req/s.

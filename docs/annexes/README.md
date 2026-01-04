@@ -29,14 +29,4 @@ Annexes are intentionally **comparative and exploratory**. They address question
 - Where are the trust boundaries and failure domains?
 - What tradeoffs exist between local, sticky, and distributed enforcement?
 
-## Scope and Completeness
-
-These documents are **intentionally incomplete**. They outline design spaces, surface tradeoffs, and pose open questions. They are not implementation guides.
-
 Annexes assume familiarity with the core milestones. Readers should understand the baseline architecture (M1–M4) before exploring these extensions.
-
-## Tone and Audience
-
-These documents are written for senior engineers familiar with distributed systems, edge architectures, and operational tradeoffs. They prioritize architectural reasoning over tutorial-style explanation. Tone is calm, technical, and non-marketing.
-
-Open questions and TODO sections are explicit—these annexes document design explorations, not complete solutions.
