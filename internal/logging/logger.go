@@ -65,3 +65,19 @@ func (l *Logger) LogError(msg string, err error, fields map[string]interface{}) 
 	data, _ := json.Marshal(logData)
 	l.logger.Println(string(data))
 }
+
+// LogInfo logs an informational message
+func (l *Logger) LogInfo(msg string, fields map[string]interface{}) {
+	logData := map[string]interface{}{
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"level":     "info",
+		"message":   msg,
+	}
+
+	for k, v := range fields {
+		logData[k] = v
+	}
+
+	data, _ := json.Marshal(logData)
+	l.logger.Println(string(data))
+}

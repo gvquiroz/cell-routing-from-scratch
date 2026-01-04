@@ -56,8 +56,9 @@ func main() {
 	// Create router with config loader
 	router := routing.NewRouter(configLoader)
 
-	// Create proxy handler
-	handler := proxy.NewHandler(router, logger)
+	// Create proxy handler (pass config for resilience mechanisms)
+	handler := proxy.NewHandler(router, configLoader.GetConfig(), logger)
+	defer handler.Stop()
 
 	// Create debug handler
 	debugHandler := debug.NewHandler(configLoader)
