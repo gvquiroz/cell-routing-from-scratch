@@ -36,8 +36,6 @@ Pingora's abstractions (peer selection, load balancing modules, health check sub
 
 **TLS**: Baseline router uses `http.Transport` TLS config. Pingora's TLS handling is lower-level (BoringSSL bindings). Client cert validation, ALPN, and session resumption are configurable but require explicit setup.
 
-**Observability**: Go's structured logging is external. Pingora has built-in metrics (Prometheus-compatible) and tracing hooks. Explainability headers (`X-Routed-To`, `X-Circuit-State`) remain identical; instrumentation integration differs.
-
 ## Why This Is a Comparison, Not a Rewrite
 
 The educational value of the baseline router is its simplicity: standard library, minimal abstractions, ~1000 lines of routing logic. Pingora improves performance (memory, latency, throughput) but adds complexity (async runtime, Rust ownership, framework APIs).
@@ -51,5 +49,3 @@ This annex documents how to **think about** porting the router's semantics to Pi
 - **Control plane protocol**: WebSocket vs HTTP/2 server push for config distribution. Does Pingora's async model change reconnection strategy?
 - **Graceful shutdown**: How Pingora's connection draining compares to Go's `Server.Shutdown` with in-flight request handling.
 - **Error handling**: Pingora's `Error` types vs Go's `error` interface. How circuit breaker failures propagate.
-
-**Future expansion**: Side-by-side implementation in `cmd/router-pingora/` for direct comparison. Performance benchmarks. Operational runbook differences.

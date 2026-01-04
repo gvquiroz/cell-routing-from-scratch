@@ -73,8 +73,6 @@ Shuffle sharding **requires** health-aware routing. Without health checks, route
 
 **Config size**: Shard definitions increase config size. For 1000 tenants with shard size 5, config contains 5000 cell references. Acceptable for control plane push (few KB), but impacts config reload latency.
 
-**Observability**: Logs must include which cell within shard was selected. Response header: `X-Routed-To: shard-A-cell-3` (shard ID + cell ID).
-
 ## Blast Radius Calculation
 
 For `k`-sized shards from pool of `N` cells:
@@ -93,5 +91,3 @@ Example: 1000 tenants, `k = 5`, `N = 50`:
 - **Cross-cell sessions**: If tenant's shard contains cells in different regions, does session state need to sync across cells?
 - **Cost tradeoff**: Shuffle sharding increases cell pool size (need 50 cells instead of 5 tiers). When is the cost justified?
 - **Metrics**: How to measure shuffle sharding effectiveness? Blast radius reduction vs operational overhead.
-
-**Future expansion**: Reference implementation of shuffle sharding in router. Shard assignment algorithm. Simulation of blast radius under different shard sizes. Operational runbook for shard rebalancing.

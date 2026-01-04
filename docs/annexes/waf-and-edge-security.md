@@ -75,15 +75,6 @@ This annex explores where WAF fits in the request path, tradeoffs between global
 
 **Routing key inspection**: WAF can inspect `X-Routing-Key` for anomalies (unexpected tenant IDs, header injection attempts). Prevents routing to unauthorized cells.
 
-## Observability
-
-**WAF decision metadata**: Similar to routing headers (`X-Routed-To`), WAF decisions should be observable:
-- `X-WAF-Decision: block|allow|challenge`
-- `X-WAF-Rule-ID: sql-injection-001`
-- Logs include WAF decision reason, rule triggered, request fingerprint
-
-**Correlation**: WAF blocks and routing failures must be distinguishable in logs. If WAF blocks request, don't log as routing failure. If cell is unreachable, don't log as WAF block.
-
 ## TODO / Open Questions
 
 - **WAF rule propagation**: How to distribute WAF rules to edge and per-cell enforcement points? Control plane pushes rules alongside routing config?
@@ -91,5 +82,3 @@ This annex explores where WAF fits in the request path, tradeoffs between global
 - **Rate limiting vs WAF**: How does WAF-based rate limiting (per-IP, per-fingerprint) differ from routing-key rate limiting? Should they be unified?
 - **False positive handling**: How to allow tenants to report false positives? Per-tenant allowlists in dedicated cells?
 - **WAF bypass detection**: How to detect when edge WAF is bypassed (direct IP access)? Log correlation between edge and cell WAF decisions?
-
-**Future expansion**: Reference integration with edge WAF (Cloudflare WAF, AWS WAF, ModSecurity). Performance impact of WAF inspection on routing latency. Operational runbook for WAF rule updates.

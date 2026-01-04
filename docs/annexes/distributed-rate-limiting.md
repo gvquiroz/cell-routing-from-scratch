@@ -30,24 +30,6 @@ Each router maintains its own token buckets per routing key. No coordination bet
 - Effective limit is `N routers × per-router limit`
 - Can't enforce strict global limits
 
-**When acceptable**: Small fleets, even traffic distribution, approximate fairness sufficient.
-
-### Sticky (Session-Affinity) Rate Limiting
-
-Route requests with the same `X-Routing-Key` to the same router (consistent hashing, sticky load balancing). Each router enforces limits for its assigned keys.
-
-**Pros**:
-- Accurate per-key limits without coordination
-- No shared state required
-- Low latency (local token bucket)
-
-**Cons**:
-- Requires sticky routing upstream (load balancer, ingress controller)
-- Router failure redistributes keys → limit resets or unfair allocation
-- Doesn't work if traffic pattern changes (new routers, key reassignment)
-
-**When acceptable**: Stable router fleet, upstream supports consistent hashing, keys map to long-lived sessions.
-
 ### Distributed (Coordinated) Rate Limiting
 
 All routers share rate limit state via external service (Redis, dedicated rate limiter like Envoy's global rate limit service).
@@ -87,7 +69,4 @@ Milestone 4 adds **concurrency limits** because they preserve local state: semap
 - **Hybrid approach**: Local rate limiting with periodic sync to Redis. What sync interval balances fairness and latency?
 - **Per-placement vs per-key limits**: Should rate limits apply to `routingKey` (tenant) or `placementKey` (cell)? Or both?
 - **Graceful degradation**: If distributed rate limiter is unavailable, fall back to local limits? How to avoid thundering herd when state service recovers?
-- **Observability**: How to surface per-key rate limit state across fleet? Aggregate metrics? Per-router dashboards?
 - **Config schema**: How to express per-key limits in routing config? Inline in `routingTable` or separate `rateLimits` object?
-
-**Future expansion**: Reference implementation of local, sticky, and distributed rate limiting. Benchmarks comparing latency and fairness. Operational runbook for rate limiter state service.
