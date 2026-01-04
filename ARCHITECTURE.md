@@ -1,181 +1,305 @@
-# Architecture Decisions - Milestone 1
+# System Architecture
 
-## Overview
-This document captures key architectural decisions made during Milestone 1 implementation.
+## Purpose
 
-## Routing Design
+This document describes the production-grade architectural patterns implemented in this project. The system demonstrates control plane/data plane separation, atomic configuration distribution, and graceful degradation—patterns common to edge routing infrastructure at Cloudflare, Fastly, and similar platforms.
 
-### Decision: Two-Level Mapping
-We use a two-level indirection: `routingKey → placementKey → endpointURL`
+This is not a feature list. It's a map of invariants, failure domains, and tradeoffs that define how the system behaves under normal and adverse conditions.
 
-**Rationale:**
-- Allows multiple routing keys (customers) to share the same placement
-- Decouples customer identity from infrastructure topology
-- Makes it easier to migrate customers between tiers or create dedicated cells
+## Architectural Invariants
 
-### Decision: Immutable In-Memory Maps
-Routing maps are initialized once at startup and never modified.
+These properties hold across all operating modes:
 
-**Rationale:**
-- Thread-safe without locks (read-only access)
-- Simple and predictable behavior
-- Sufficient for Milestone 1 (no hot reload requirement)
-- Forces restarts for config changes, which is acceptable for now
+1. **Zero-downtime updates**: Configuration changes never drop in-flight requests
+2. **Last-known-good over newest**: Data planes reject invalid configs, continuing with previous valid state
+3. **Fail-safe routing**: Unknown routing keys default to tier3 (catch-all), never returning 5xx for missing routes
+4. **Availability over consistency**: Data planes continue routing through control plane outages
+5. **Atomic state transitions**: Configuration updates are all-or-nothing; no partial application
+6. **Explicit observability**: Every routing decision is logged and exposed via debug endpoints
 
-### Decision: Default to tier3
-Missing or unknown routing keys default to `tier3` placement.
+## System Topology
 
-**Rationale:**
-- Fail safe: every request gets routed somewhere
-- tier3 acts as a "catch-all" tier
-- Prevents 5xx errors for unknown customers
-- Makes debugging easier (unknown traffic goes to one place)
+### Component Separation
 
-## Proxy Implementation
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Control Plane (CP)                    │
+│  • Watches authoritative config (routing.json)          │
+│  • Validates before distribution                        │
+│  • Broadcasts snapshots to all data planes              │
+│  • Port 8081: /connect (WebSocket), /health            │
+└──────────────────┬──────────────────────────────────────┘
+                   │ WebSocket (long-lived, CP-initiated)
+                   │ • JSON messages: config_snapshot
+                   │ • DP responses: ack/nack
+                   ▼
+┌────────────────────────────────────────────────────────┐
+│               Data Plane (DP) - N instances             │
+│  • Accepts requests on port 8080                       │
+│  • Routes based on X-Routing-Key header                │
+│  • Connects outbound to CP (exponential backoff)       │
+│  • Falls back to file watch if no CP configured        │
+│  • Debug endpoint: /debug/config-version + source      │
+└────────────────────────────────────────────────────────┘
+```
 
-### Decision: Standard Library Reverse Proxy Approach
-We built a custom proxy handler rather than using `httputil.ReverseProxy`.
+**Failure domain isolation**: Control plane crashes do not affect data plane request routing. Data planes operate autonomously with last-known-good configuration.
 
-**Rationale:**
-- More control over headers (explainability headers)
-- Clearer logging integration
-- Streaming support without buffering
-- Direct access to status codes for logging
-- Educational value (shows how proxies work)
+### Configuration Flow
 
-**Trade-offs:**
-- More code to maintain
-- Need to handle edge cases ourselves
-- Could switch to `httputil.ReverseProxy` in future if complexity grows
+**Control plane mode** (production pattern):
+1. CP watches `config/routing.json` (2s ticker)
+2. On change: validate, increment version, broadcast to all connected DPs
+3. DPs validate received snapshot, send ack/nack
+4. DP applies valid config atomically, updates source to "control_plane"
+5. DPs reconnect with exponential backoff (1s → 60s) on disconnect
 
-### Decision: Connection Pooling with Timeouts
-We configure the HTTP transport with specific timeouts and connection reuse.
+**File-only mode** (single-node fallback):
+1. DP watches `config/routing.json` if `CONTROL_PLANE_URL` unset
+2. On change: validate, apply atomically, update source to "file"
+3. No dependency on control plane
 
-**Timeouts configured:**
-- Dial timeout: 5s (connection establishment)
-- TLS handshake: 5s
-- Response headers: 10s (TTFB)
-- Request timeout: 30s (total request)
-- Idle connection: 90s (keep-alive)
+**Bootstrap**: Data planes start with `config/dataplane-initial.json` (v0.0.1) in CP mode, immediately replaced by CP snapshot on connection.
 
-**Rationale:**
-- Prevents hung connections
-- Reuses connections for better performance
-- Protects against slow upstream servers
-- Standard production-ready values
+## Routing Model
 
-## Observability
+### Two-Level Indirection
 
-### Decision: Structured JSON Logging
-All logs are emitted as JSON to stdout.
+`routingKey → placementKey → endpointURL`
 
-**Rationale:**
-- Easy to parse by log aggregation systems
-- Consistent format across all log entries
-- No third-party dependencies
-- Standard practice for containerized applications
+Example:
+```
+customer-123 → tier2 → http://tier2-cell:8080
+customer-456 → tier2 → http://tier2-cell:8080
+customer-789 → dedicated-cell-1 → http://dedicated-cell:8080
+```
 
-### Decision: Explainability Headers
-Every response includes `X-Routed-To` and `X-Route-Reason` headers.
+**Tradeoffs**:
+- ✅ Decouples tenant identity from infrastructure topology
+- ✅ Allows multiple tenants per placement (cost efficiency)
+- ✅ Enables placement migration without changing all tenant mappings
+- ❌ Extra indirection adds cognitive overhead
+- ❌ Config is slightly larger than direct mapping
 
-**Rationale:**
-- Makes routing decisions transparent
-- Aids debugging and testing
-- No performance impact
-- Useful for monitoring and alerting
-- Educational (helps understand the system)
+### Default Routing (tier3)
 
-### Decision: Request ID Propagation
-Generate request IDs if not present; propagate if already exists.
+Unknown routing keys fall back to `tier3` placement.
 
-**Rationale:**
-- Enables distributed tracing
-- Links logs across services
-- Standard practice in microservices
-- Low overhead
+**Rationale**: Fail-safe over fail-fast. New customers get routed to shared infrastructure rather than receiving 5xx errors. Makes staged rollouts safer (new customers automatically land in default tier).
 
-## Error Handling
+### Thread Safety
 
-### Decision: Return 502 for Upstream Failures
-Unreachable or failing upstreams return 502 Bad Gateway.
+Routing maps are:
+1. Built atomically from validated config
+2. Swapped via atomic pointer update (`atomic.Value`)
+3. Previous maps remain readable during swap (no locks needed)
 
-**Rationale:**
-- Correct HTTP semantics (5xx = server error)
-- 502 specifically means "bad upstream"
-- Client can distinguish from router errors (500)
-- Standard reverse proxy behavior
+**Implication**: Read path has zero contention. Routing decisions never block on configuration updates.
 
-### Decision: Return 500 for Configuration Errors
-Missing placement endpoints return 500 Internal Server Error.
+## Configuration Validation
 
-**Rationale:**
-- Indicates a configuration problem (server fault)
-- Should never happen in production (config is validated)
-- Helps catch deployment issues
+### Pre-Distribution Checks
 
-## Testing Strategy
+Both CP and DP validate before applying:
+- All placements referenced in routes must exist in placements map
+- No duplicate routing keys
+- Version must be non-empty string
+- All URLs must parse correctly
 
-### Decision: Unit Tests for Routing Logic Only
-We only test the pure routing decision function, not the proxy.
+**Failure behavior**: 
+- CP: Logs error, does not broadcast, continues watching for next change
+- DP: Sends `nack` to CP, retains last-known-good config
 
-**Rationale:**
-- Routing logic is complex and critical
-- Proxy is mostly glue code using standard library
-- Integration tests would require mocking HTTP
-- Keeps tests fast and focused
-- Can add integration tests in future milestones
+### Atomic Application
 
-## Deployment
+Config updates are all-or-nothing:
+```go
+// Build new sta Strategy
 
-### Decision: Multi-Container Docker Compose
-Development environment uses Docker Compose with separate containers.
+### Structured Logging
 
-**Rationale:**
-- Easy to run locally
-- Mirrors production architecture (separate cells)
-- Tests container builds
-- No need to manage multiple terminals
-- Includes networking (service discovery)
+JSON logs to stdout (standard container pattern):
+```json
+{
+  "timestamp": "2024-01-15T10:23:45Z",
+  "level": "info",
+  "routing_key": "customer-123",
+  "placement": "tier2",
+  "upstream": "http://tier2-cell:8080",
+  "status": 200,
+  "duration_ms": 45,
+  "request_id": "req-abc-123"
+}
+```
 
-### Decision: Multi-Stage Docker Builds
-Both Dockerfiles use multi-stage builds (builder + runtime).
+**Design choice**: No log levels except error vs info. If you're emitting it, it should be worth storing.
 
-**Rationale:**
-- Smaller final images (alpine-based)
-- Separates build dependencies from runtime
-- Faster subsequent builds (layer caching)
-- Standard Go Docker pattern
+### Explainability Headers
 
-## Future Considerations
+Every proxied response includes:
+- `X-Routed-To`: Target upstream URL
+- `X-Route-Reason`: Placement key that determined routing
+- `X-Request-ID`: Trace ID for distributed request tracking
 
-### What We Explicitly Deferred
-- **Health checks:** No active health monitoring of cells
-- **Control plane:** No dynamic routing table updates
-- **Rate limiting:** No per-customer or per-cell limits
-- **Circuit breakers:** No automatic failover logic
-- **Retries:** No automatic retry on failure
-- **Metrics:** No Prometheus/StatsD instrumentation
-- **Config reload:** Requires restart to change routing
+**Purpose**: Makes every routing decision inspectable without needing log access. Critical for debugging in production.
 
-### Why These Are Deferred
-These features add significant complexity and are not needed for the learning goals of Milestone 1. Each will be addressed in future milestones as we build up the system incrementally.
+### Debug Endpoints
+Failure Modes and Handling
 
-## Non-Decisions (What We Didn't Do)
+### Upstream Failures
 
-### Authentication/Authorization
-We explicitly assume `X-Routing-Key` is already validated by an upstream service.
+| Condition | Status | Rationale |
+|-----------|--------|-----------|
+| Connection refused | 502 | Upstream not listening (deployment issue) |
+| Dial timeout (5s) | 502 | Upstream unreachable (network partition) |
+| Response timeout (10s) | 504 | Upstream too slow (overload or deadlock) |
+| Upstream returns 5xx | Proxied | Upstream owns error, pass through |
 
-**Rationale:**
-- Auth is a separate concern
-- Router should be a simple, fast proxy
-- Keeps Milestone 1 focused
-- Real systems have auth at the edge (API gateway, load balancer)
+**No automatic retries**: Request may have side effects (POST/PUT). Retries belong at client layer where idempotency is known.
+
+### Configuration Failures
+
+| Condition | DP Behavior | CP Behavior |
+|-----------|-------------|-------------|
+| Invalid config on disk | Log error, keep last-good | Log error, don't broadcast |
+| Invalid config from CP | Send nack, keep last-good | N/A |
+| MWebSocket Protocol
+
+### Message Types
+
+CP → DP:
+```json
+{
+  "type": "config_snapshot",
+  "config": { /* full routing config */ }
+}
+```
+
+DP Testing Philosophy
+
+28 tests across four packages:
+
+**internal/routing** (8 tests):
+- Routing key resolution (two-level mapping)
+- Default tier3 fallback
+- Thread safety of atomic swap
+
+**internal/config** (13 tests):
+- JSON deserialization
+- Validation (missing placements, duplicates)
+- Atomic reload behavior
+- Source tracking (file vs control_plane)
+
+**internal/protocol** (4 tests):
+- Message serialization/deserialization
+- Type validation
+
+**internal/dataplane** (3 tests):
+- Connection establishment
+- CExplicit Non-Goals
+
+### Authentication
+We assume `X-Routing-Key` is already validated by upstream edge infrastructure.
+
+**Rationale**: Cell routers sit behind API gateways/load balancers in production. Auth is enforced at the perimeter, not repeated at every internal hop. Keeps this component focused on routing decisions.
 
 ### TLS Termination
-Router communicates with cells over HTTP (not HTTPS).
+Router ↔ cell communication uses HTTP, not HTTPS.
 
-**Rationale:**
-- Cells are on internal network
-- TLS termination typically happens at edge
-- Simplifies demo environment
-- Can add mTLS in future if needed
+**Rationale**: Cells are internal services on trusted networks. TLS termination happens at edge (load balancer). mTLS between internal services is a deployment concern, not core to routing logic. Can be added via sidecar proxies (Envoy, Linkerd) without changing router code.
+
+### Health Checking
+No active health probes of upstream cells.
+
+**Rationale**: Deferred to M4 (Circuit Breakers milestone). Proper health checking requires:
+- Passive: failure rate tracking
+- Active: periodic health probes  
+- Policy: circuit breaker thresholds
+- Coordination: CP must know which cells are unhealthy
+
+Adding half-baked health checks now would create false confidence. Better to route to all configured upstreams and fail fast with 502 than route around presumed-unhealthy upstreams incorrectly.
+
+### Rate Limiting
+No per-tenant or per-cell rate limits.
+
+**Rationale**: Rate limiting requires:
+- Sliding window counters (memory overhead)
+- Distributed coordination (Redis/Memcached for multi-DP)
+- Policy configuration (which customers get what limits)
+- Backpressure semantics (429 responses, retry-after headers)
+
+This is a full subsystem. Edge infrastructure typically handles this upstream (Cloudflare, Kong, Envoy).
+
+### Metrics
+No Prometheus/StatsD instrumentation.
+
+**Rationale**: Structured logs provide request-level observability for this learning project. Production systems need:
+- Histograms (latency distribution, not just mean)
+- Counters (requests/sec per route, status codes)
+- Gauges (active connections, config version)
+
+Can be added via middleware without changing routing logic. Out of scope for foundational architecture demonstration.
+
+### Retries
+No automatic retry on upstream failure.
+
+**Rationale**: Retries require idempotency guarantees (safe for GET, dangerous for POST/PUT). Client layer knows request semantics, router doesn't. Automatic retries can amplify cascading failures (retry storm). If needed, implement at client SDK level with backoff and jitter.
+
+## Lessons from Implementation
+
+### Atomic Pointer Swap
+`atomic.Value` for config swaps eliminated need for `sync.RWMutex`. Read path has zero lock contention, critical for high-throughput routing. Tradeoff: Slightly awkward API (type assertions), but worth it for performance.
+
+### Full Snapshots over Deltas
+WebSocket protocol sends complete config every time, never diffs/patches. This is less "efficient" but dramatically simpler:
+- No versioning conflicts
+- Reconnection is trivial (just resend latest)
+- No accumulation of missed deltas
+- Easier to reason about correctness
+
+**Bandwidth cost**: ~10KB per config update for 100 routes. Negligible compared to debugging time saved.
+
+### Exponential Backoff Prevents Thundering Herd
+1000 data planes reconnecting every 1s after CP restart would create ~1000 conn/sec spike. Exponential backoff with jitter spreads reconnections over time. Jitter not yet implemented but would be next optimization.
+
+### Fail-Safe Defaults Reduce Operational Burden
+Unknown routing keys → tier3 (vs 5xx error) means:
+- New customers work immediately
+- Typos in config don't break production
+- Gradual rollouts are safer (new keys automatically land somewhere)
+
+Tradeoff: Easier to hide misconfigurations. Monitoring must alert on tier3 traffic spikes.
+  environment:
+    CONTROL_PLANE_URL: ws://control-plane:8081/connect
+
+tier1-cell:     # Upstream
+  ports: 8080
+tier2-cell:     # Upstream  
+  ports: 8080
+tier3-cell:     # Upstream
+  ports: 8080
+```
+
+**Networking**: All containers on shared `app-network`, service discovery via Docker DNS.
+1. DP connects to `ws://control-plane:8081/connect`
+2. CP immediately sends full config snapshot
+3. DP validates, responds with ack/nack
+4. CP watches file, broadcasts on change
+5. On disconnect: DP retries with exponential backoff
+
+**Design note**: Always full snapshots, never deltas. Simplifies state synchronization, eliminates out-of-order delivery concerns, makes reconnection trivial (no state to rebuild).
+
+### Backoff Strategy
+
+```
+Attempt 1: 1s
+Attempt 2: 2s
+Attempt 3: 4s
+Attempt 4: 8s
+...
+Max: 60s (stays at 60s after reaching)
+```
+
+**Reset condition**: Successful connection resets backoff to 1s. immediate reconnect attempt
+
+**Availability guarantee**: Control plane is for orchestration, not request path. Zero DP request failures during CP outage.arded to upstream
