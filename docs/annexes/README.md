@@ -4,7 +4,9 @@
 
 - **[Request Processing Pipelines](request-processing-pipelines.md)**: Foundational model for composing ingress concerns (WAF, auth, rate limiting, routing). Sequential stages, short-circuit semantics, trust boundaries. Go middleware and Pingora phases as examples.
 
-- **[Rate Limiting](rate-limiting.md)**: Per-key rate limiting design space. Local vs sticky vs distributed enforcement. Why it's excluded from core router scope.
+- **[Caching and CDN](caching-and-cdn.md)**: Cache as pipeline stage. Placement strategies (before/after routing, two-tier). Tenant isolation through cache keys. Invalidation and failure semantics during cell failover.
+
+- **[Distributed Rate Limiting](rate-limiting.md)**: Per-key rate limiting design space. Local vs distributed enforcement. Why it's excluded from core router scope.
 
 - **[Authentication and Routing Keys](auth-routing-key.md)**: Trust boundaries for routing metadata.
 
