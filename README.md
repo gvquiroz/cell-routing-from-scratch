@@ -2,12 +2,21 @@
 
 ```mermaid
 flowchart LR
-    subgraph cp["Control Plane"]
-        Config[(config)] --> CP[CP]
-    end
+    Client([Client])
     
-    subgraph dp["Data Plane"]
-        Router[Router]
+    subgraph system["Routing System"]
+        direction TB
+        subgraph cp["Control Plane"]
+            Config[(config)] --> CP[CP]
+        end
+        
+        subgraph dp["Data Plane (stateless)"]
+            R1[Router]
+            R2[Router]
+            R3[Router]
+        end
+        
+        CP -.->|"config push"| R1 & R2 & R3
     end
     
     subgraph cells["Cells"]
@@ -16,11 +25,8 @@ flowchart LR
         Visa[visa]
     end
     
-    Client([Client]) -->|"X-Routing-Key: visa"| Router
-    CP -.->|"config push"| Router
-    Router -->|dedicated| Visa
-    Router -->|shared| T1
-    Router -->|default| T3
+    Client --> R1 & R2 & R3
+    R1 & R2 & R3 --> T1 & T3 & Visa
 ```
 
 A working implementation of cell-based ingress routing that demonstrates control plane / data plane separation from first principles. This repository explores how production edge systems maintain local routing decisions while distributing centralized configuration and why that architectural pattern matters for reliability at scale.
