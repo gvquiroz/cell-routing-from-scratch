@@ -8,14 +8,44 @@ This milestone demonstrates the pattern used in production edge systems: central
 
 ## Design Constraints
 
-**Control plane never in request path**  
-Routing decisions use local config only. WebSocket connection failure does not impact request processing. Config updates are asynchronous pushes, not synchronous pulls.
+All [architectural invariants](../../README.md#architectural-invariants) are preserved. Key constraints for CP/DP separation:
 
-**Data plane autonomy**  
-Routers bootstrap from a local config file (`dataplane-initial.json`) with stale/minimal config. Control plane connection is established after startup. If control plane is unreachable, router continues serving with bootstrap config. If connection is lost, router continues serving with last-received config.
+- **Control plane never in request path**: WebSocket failure does not impact routing
+- **Data plane autonomy**: Routers bootstrap from local config, operate indefinitely without CP
+- **Push model, full snapshots**: CP broadcasts entire config; DP validates before applying
 
-**Push model, full snapshots**  
-Control plane broadcasts entire config on every change (no deltas). Data plane validates received config before applying. Acknowledgment protocol (ack/nack) allows control plane to track deployment success.
+## CP/DP Interaction
+
+```mermaid
+sequenceDiagram
+    participant DP as Data Plane
+    participant CP as Control Plane
+    participant FS as Config File
+    
+    Note over DP: Starts with bootstrap config
+    DP->>CP: Connect (WebSocket)
+    
+    loop File Watch
+        FS-->>CP: Config change detected
+        CP->>DP: config_snapshot (full config)
+        DP->>DP: Validate config
+        alt Valid
+            DP->>DP: Atomic swap
+            DP->>CP: ack
+        else Invalid
+            DP->>CP: nack (error details)
+            Note over DP: Keeps current config
+        end
+    end
+    
+    Note over DP,CP: Connection lost
+    DP--xCP: Disconnect
+    Note over DP: Continues with last-known-good config
+    
+    loop Reconnect
+        DP->>CP: Retry with backoff
+    end
+```
 
 ## Implementation Approach
 

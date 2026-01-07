@@ -38,8 +38,10 @@ Baseline router atomically swaps config on WebSocket push. Workers fetch config 
 
 **Upstream unreachable**: Same as baseline—return 502 or route to fallback.
 
-## TODO / Open Questions
+## Future Exploration
 
-- **Config caching strategy**: How often to revalidate KV config without adding latency. Cache in global scope vs per-request fetch.
-- **Cold start impact**: How much does cold start latency matter for cell routing at the edge? Are requests retried upstream if Worker times out?
-- **Multi-region failover**: How routing decisions differ when Workers are globally distributed vs baseline router in single region. Does health state need to be region-aware?
+Edge routing at Workers scale introduces constraints not present in traditional proxies:
+
+- **Config caching**: Cache config in global scope (persists across requests in same isolate), revalidate on version mismatch or TTL expiry. Typical: 60s TTL with async refresh.
+- **Cold start impact**: Cold starts add 5–50ms. For cell routing, this is acceptable—routing decisions are fast once initialized. Pre-warming via scheduled triggers mitigates impact for latency-sensitive paths.
+- **Multi-region awareness**: Workers execute globally, but cells may be region-specific. Routing decisions should incorporate region hints (Cloudflare's `cf.colo`) to prefer nearby cells.

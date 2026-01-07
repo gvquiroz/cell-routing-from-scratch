@@ -8,14 +8,10 @@ This milestone demonstrates the pattern: **last-known-good config is more valuab
 
 ## Invariants Preserved
 
-**Control plane never in request path**  
-Config reload happens asynchronously in a background goroutine. Routing decisions read config via `atomic.Value.Load()`—no locks, no blocking.
+All [architectural invariants](../../README.md#architectural-invariants) from M1 are preserved. This milestone adds:
 
-**Atomic config updates**  
-New config is validated before application. If valid, swapped atomically. Concurrent requests see either old config or new config, never a mix. Go's `atomic.Value` provides memory ordering guarantees.
-
-**Graceful degradation**  
-Invalid config is rejected with detailed error logs. Router continues serving with previous config. No request failures during attempted config updates.
+- **Atomic config updates**: Validated before swap; concurrent requests see old or new config, never partial
+- **Last-known-good fallback**: Invalid configs rejected; router continues with previous valid config
 
 ## Configuration Format
 

@@ -12,11 +12,25 @@ Pipelines enable separation of concerns, early rejection (fail-fast), and clear 
 
 A pipeline is an ordered sequence of **stages** (also called middleware, phases, or filters):
 
+```mermaid
+flowchart LR
+    subgraph Pipeline
+        direction LR
+        S1["Rate Limit"] --> S2["WAF"]
+        S2 --> S3["Auth"]
+        S3 --> S4["Routing"]
+        S4 --> S5["Proxy"]
+    end
+    
+    Request([Request]) --> S1
+    S5 --> Upstream([Upstream])
+    
+    S1 -.->|429| Response1([Response])
+    S2 -.->|403| Response2([Response])
+    S3 -.->|401| Response3([Response])
 ```
-Request → [Stage 1] → [Stage 2] → ... → [Stage N] → Upstream
-            ↓           ↓                   ↓
-         Response    Response            Response
-```
+
+*Each stage can short-circuit the pipeline and return a response directly.*
 
 Each stage can:
 1. **Inspect**: Read request metadata (headers, method, path) without modification

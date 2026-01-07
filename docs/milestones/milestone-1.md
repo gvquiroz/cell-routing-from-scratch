@@ -22,14 +22,11 @@ Unknown routing keys default to "tier3" (catch-all shared tier). Missing routing
 
 ## Invariants Established
 
-**Local decisions only**  
-No RPC, no database lookups, no external calls during routing. Routing tables are immutable after initialization—no locking required for concurrent reads.
+This milestone establishes the foundational invariants that hold across all future milestones. See [Architectural Invariants](../../README.md#architectural-invariants) for the full explanation.
 
-**Streaming proxy**  
-Request and response bodies are streamed via `io.Copy`, not buffered. Large payloads flow through the proxy without memory exhaustion.
-
-**Connection pooling**  
-Configured `http.Transport` with reasonable timeouts (5s dial, 10s response header, 30s total request, 90s idle). Connection reuse for upstream cells.
+- **Local decisions only**: No RPC during routing—tables are immutable after init
+- **Streaming proxy**: Bodies streamed via `io.Copy`, not buffered
+- **Connection pooling**: Configured timeouts (5s dial, 30s request, 90s idle)
 
 ## Failure Modes
 

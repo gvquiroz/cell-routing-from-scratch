@@ -84,10 +84,12 @@ Example: 1000 tenants, `k = 5`, `N = 50`:
 - Each cell appears in ~10% of shards
 - One cell failure impacts ~100 tenants (10%), not all 1000
 
-## TODO / Open Questions
+## Future Exploration
 
-- **Shard assignment algorithm**: Which shuffle algorithm (Fisher-Yates, hash-based partitioning)? How to ensure even distribution?
-- **Shard rebalancing**: When cells are added/removed from pool, how to minimize tenant shard changes (stable assignment)?
-- **Cross-cell sessions**: If tenant's shard contains cells in different regions, does session state need to sync across cells?
-- **Cost tradeoff**: Shuffle sharding increases cell pool size (need 50 cells instead of 5 tiers). When is the cost justified?
-- **Metrics**: How to measure shuffle sharding effectiveness? Blast radius reduction vs operational overhead.
+Shuffle sharding introduces operational complexity that scales with tenant count:
+
+- **Assignment algorithm**: Fisher-Yates with tenant ID as seed provides deterministic, reproducible shards. Hash-based partitioning (consistent hashing) enables incremental rebalancing.
+- **Stable rebalancing**: When cells are added/removed, minimize tenant shard changes using consistent hashing or explicit migration tables.
+- **Cross-cell state**: If a tenant's shard spans regions, session state either stays region-local (simpler) or syncs across cells (complex, rarely justified).
+- **Cost model**: Shuffle sharding requires larger cell pools than simple tiering. Justify when blast radius reduction outweighs infrastructure cost—typically at 100+ tenants in shared tiers.
+- **Effectiveness metrics**: Measure blast radius reduction (% tenants impacted per cell failure) vs operational overhead (config size, health check fanout).

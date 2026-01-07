@@ -1,33 +1,64 @@
 # Architecture
 
+> **Quick Reference** — This document is a concise cheat sheet. For detailed explanations, tradeoff reasoning, and failure mode analysis, see the [README](README.md) and [milestone docs](docs/milestones/).
+
 ## Invariants
 
-1. **Zero-downtime updates**: Config changes never drop in-flight requests
-2. **Last-known-good over newest**: Data planes reject invalid configs
-3. **Fail-safe routing**: Unknown keys → tier3 (never 5xx)
-4. **Availability over consistency**: Data planes work through CP outages
-5. **Atomic state transitions**: All-or-nothing config updates
-6. **Local routing**: All decisions in-memory; CP never on request path
+See [Architectural Invariants](README.md#architectural-invariants) for full explanation. Summary:
+
+| Invariant | One-liner |
+|-----------|----------|
+| Control plane never in request path | Routing uses local state only; CP failure doesn't affect requests |
+| Atomic config updates | All-or-nothing swap via `atomic.Value`; no partial state |
+| Graceful degradation | Last-known-good config on CP outage or invalid config |
+| Local resilience state | Health checks, circuit breakers, limits are per-router |
+| Fail-safe routing | Unknown keys → tier3 (never 5xx for missing config) |
 
 ## Topology
 
+```mermaid
+flowchart TB
+    subgraph edge["Edge"]
+        Client([Client])
+    end
+    
+    subgraph cp["Control Plane"]
+        ConfigFile[(routing.json)]
+        CP[CP Server<br/>:8081]
+        ConfigFile -->|watch| CP
+    end
+    
+    subgraph dp["Data Plane"]
+        Router[Router<br/>:8080]
+    end
+    
+    subgraph cells["Cells"]
+        Tier1[tier1<br/>:9001]
+        Tier2[tier2<br/>:9002]
+        Tier3[tier3<br/>:9003]
+        Dedicated[visa<br/>:9004]
+    end
+    
+    Client -->|X-Routing-Key| Router
+    CP -->|WebSocket<br/>config push| Router
+    Router -->|proxy| Tier1
+    Router -->|proxy| Tier2
+    Router -->|proxy| Tier3
+    Router -->|proxy| Dedicated
+    
+    Router -.->|health checks| Tier1
+    Router -.->|health checks| Tier2
+    Router -.->|health checks| Tier3
+    Router -.->|health checks| Dedicated
 ```
-Control Plane (CP)
-  • Watches routing.json
-  • Validates → broadcasts via WebSocket
-  • Port 8081: /connect, /health
 
-Data Plane (DP)
-  • Port 8080: routes requests
-  • Reads X-Routing-Key header
-  • Connects to CP or falls back to file watch
-  • Health checks: periodic active probes
-  • Circuit breakers: per-endpoint failure tracking
-  • Concurrency limits: per-placement semaphores
-  • Debug: /debug/config-version
-```
+| Component | Port | Endpoints | Role |
+|-----------|------|-----------|------|
+| Control Plane | 8081 | `/connect`, `/health` | Config source, WebSocket broadcast |
+| Data Plane | 8080 | `/*`, `/debug/config` | Request routing, health checks, circuit breakers |
+| Cells | 9001-9004 | `/*`, `/health` | Upstream backends |
 
-**Failure isolation**: CP crashes don't affect DP routing. Unhealthy upstreams trigger automatic fallback routing.
+**Failure isolation**: CP crashes don't affect DP routing. Unhealthy upstreams trigger automatic fallback.
 
 ## Routing Model
 

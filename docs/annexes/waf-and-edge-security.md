@@ -75,10 +75,12 @@ This annex explores where WAF fits in the request path, tradeoffs between global
 
 **Routing key inspection**: WAF can inspect `X-Routing-Key` for anomalies (unexpected tenant IDs, header injection attempts). Prevents routing to unauthorized cells.
 
-## TODO / Open Questions
+## Future Exploration
 
-- **WAF rule propagation**: How to distribute WAF rules to edge and per-cell enforcement points? Control plane pushes rules alongside routing config?
-- **Challenge mechanisms**: How do challenge flows (CAPTCHA, JS challenge) interact with stateless routers? Session state for challenges?
-- **Rate limiting vs WAF**: How does WAF-based rate limiting (per-IP, per-fingerprint) differ from routing-key rate limiting? Should they be unified?
-- **False positive handling**: How to allow tenants to report false positives? Per-tenant allowlists in dedicated cells?
-- **WAF bypass detection**: How to detect when edge WAF is bypassed (direct IP access)? Log correlation between edge and cell WAF decisions?
+These questions represent design decisions that depend on operational context:
+
+- **Rule distribution**: WAF rules could be pushed alongside routing config (unified control plane) or managed separately (dedicated security pipeline). Unified is simpler; separate allows security team autonomy.
+- **Challenge flows**: CAPTCHA/JS challenges require session state. Options: stateless signed tokens, edge KV storage, or delegating challenges to cells.
+- **WAF vs routing rate limits**: WAF-based limiting (per-IP, per-fingerprint) operates on different signals than routing-key limiting. Keeping them separate preserves clarity; unifying reduces config surface.
+- **False positive handling**: Per-tenant allowlists in dedicated cells enable self-service. Global allowlists require security review but apply fleet-wide.
+- **Bypass detection**: Correlating edge WAF logs with cell WAF logs detects direct-IP access. Requires log aggregation infrastructure.

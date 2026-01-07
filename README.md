@@ -1,5 +1,28 @@
 # Cell Routing from Scratch
 
+```mermaid
+flowchart LR
+    subgraph cp["Control Plane"]
+        Config[(config)] --> CP[CP]
+    end
+    
+    subgraph dp["Data Plane"]
+        Router[Router]
+    end
+    
+    subgraph cells["Cells"]
+        T1[tier1]
+        T3[tier3]
+        Visa[visa]
+    end
+    
+    Client([Client]) -->|"X-Routing-Key: visa"| Router
+    CP -.->|"config push"| Router
+    Router -->|dedicated| Visa
+    Router -->|shared| T1
+    Router -->|default| T3
+```
+
 A working implementation of cell-based ingress routing that demonstrates control plane / data plane separation from first principles. This repository explores how production edge systems maintain local routing decisions while distributing centralized configuration and why that architectural pattern matters for reliability at scale.
 
 ## What This Repository Contains
@@ -85,7 +108,7 @@ Cache as a pipeline stage. Where caching sits relative to routing (before/after,
 
 ### Security and Traffic Control
 
-**[Rate Limiting](docs/annexes/rate-limiting.md)**  
+**[Distributed Rate Limiting](docs/annexes/distributed-rate-limiting.md)**  
 Per-key rate limiting design space. Local vs distributed enforcement. Tradeoffs in consistency, latency, and operational complexity.
 
 **[Authentication and Routing Keys](docs/annexes/auth-routing-key.md)**  

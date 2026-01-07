@@ -64,9 +64,11 @@ The baseline router's invariant is **stateless local decisions**. Adding distrib
 
 Milestone 4 adds **concurrency limits** because they preserve local state: semaphore-based slot acquisition, per-router enforcement, no coordination. Rate limiting requires either distributed state or sticky routing, both of which change architectural assumptions.
 
-## TODO / Open Questions
+## Future Exploration
 
-- **Hybrid approach**: Local rate limiting with periodic sync to Redis. What sync interval balances fairness and latency?
-- **Per-placement vs per-key limits**: Should rate limits apply to `routingKey` (tenant) or `placementKey` (cell)? Or both?
-- **Graceful degradation**: If distributed rate limiter is unavailable, fall back to local limits? How to avoid thundering herd when state service recovers?
-- **Config schema**: How to express per-key limits in routing config? Inline in `routingTable` or separate `rateLimits` object?
+The following design questions are intentionally left open—they represent meaningful tradeoffs rather than unfinished work:
+
+- **Hybrid enforcement**: Local rate limiting with periodic sync to Redis. What sync interval balances fairness and latency? (Typical: 100ms–1s sync windows with local token buckets.)
+- **Limit granularity**: Should rate limits apply per `routingKey` (tenant), per `placementKey` (cell), or both? Nested limits add complexity but enable finer control.
+- **Graceful degradation**: When distributed state is unavailable, falling back to local limits risks thundering herd on recovery. Consider: gradual ramp-up, staggered reconnection.
+- **Config schema**: Expressing per-key limits—inline in `routingTable` vs separate `rateLimits` object. The latter scales better for large tenant counts.

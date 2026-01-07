@@ -23,6 +23,23 @@ Add local failure detection and overload protection without introducing shared s
 
 **Per-endpoint circuit breaker** to prevent cascading failures.
 
+```mermaid
+stateDiagram-v2
+    [*] --> Closed
+    
+    Closed --> Closed: Success (reset counter)
+    Closed --> Open: N consecutive failures
+    
+    Open --> Open: Reject requests (fail fast)
+    Open --> HalfOpen: Timeout expires
+    
+    HalfOpen --> Closed: Probe succeeds
+    HalfOpen --> Open: Probe fails
+    
+    note right of Open: Return 503 or\nroute to fallback
+    note right of HalfOpen: Allow single\ntest request
+```
+
 - **Closed**: Normal operation
 - **Open**: Fail fast after N consecutive errors (e.g., 5)
 - **Half-Open**: Test recovery after timeout (e.g., 30s)
@@ -50,10 +67,11 @@ When limits exceeded: reject early with 429 or 503.
 
 ## Architecture Invariants
 
-- **Local state only**: Health checks, circuit breakers, semaphores live in-memory per router instance.
-- **No coordination**: Multiple routers run independently. Acceptable variance in behavior.
-- **Atomic config**: Health check config is part of routing config. Atomically swapped.
-- **Fast path untouched**: Routing decisions remain in-memory lookup. Circuit breaker check adds ~100ns.
+All [architectural invariants](../../README.md#architectural-invariants) are preserved. M4-specific constraints:
+
+- **Local resilience state**: Health checks, circuit breakers, semaphores are per-router (no coordination)
+- **Acceptable variance**: Multiple routers may make different failover decisions during transient failures
+- **Fast path untouched**: Resilience checks add negligible overhead to routing decisions
 
 ## Config Schema
 
@@ -74,10 +92,22 @@ placement_to_endpoint:
 
 ## Request Flow
 
-```
-Request → Route → Circuit Breaker → Health Check → Semaphore → Proxy → Cell
-                       ↓                   ↓            ↓
-                    503 (open)      Fallback     429 (limit)
+```mermaid
+flowchart LR
+    Req([Request]) --> Route[Route]
+    Route --> CB{Circuit\nBreaker}
+    
+    CB -->|Open| R503([503])
+    CB -->|Closed| HC{Health\nCheck}
+    
+    HC -->|Unhealthy| FB[Fallback]
+    HC -->|Healthy| Sem{Semaphore}
+    
+    Sem -->|At limit| R429([429])
+    Sem -->|Available| Proxy[Proxy]
+    
+    Proxy --> Cell([Cell])
+    FB --> Sem
 ```
 
 ## Out of Scope

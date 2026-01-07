@@ -6,7 +6,7 @@
 
 - **[Caching and CDN](caching-and-cdn.md)**: Cache as pipeline stage. Placement strategies (before/after routing, two-tier). Tenant isolation through cache keys. Invalidation and failure semantics during cell failover.
 
-- **[Distributed Rate Limiting](rate-limiting.md)**: Per-key rate limiting design space. Local vs distributed enforcement. Why it's excluded from core router scope.
+- **[Distributed Rate Limiting](distributed-rate-limiting.md)**: Per-key rate limiting design space. Local vs distributed enforcement. Why it's excluded from core router scope.
 
 - **[Authentication and Routing Keys](auth-routing-key.md)**: Trust boundaries for routing metadata.
 

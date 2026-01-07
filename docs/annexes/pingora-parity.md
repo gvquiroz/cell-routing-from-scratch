@@ -36,10 +36,12 @@ Pingora's abstractions (peer selection, load balancing modules, health check sub
 
 **TLS**: Baseline router uses `http.Transport` TLS config. Pingora's TLS handling is lower-level (BoringSSL bindings). Client cert validation, ALPN, and session resumption are configurable but require explicit setup.
 
-## TODO / Open Questions
+## Future Exploration
 
-- **Benchmark comparison**: Latency (p50, p99) and memory usage under load. Go vs Pingora at 10K req/s.
-- **Peer selection**: How Pingora's load balancing interacts with single-endpoint placements vs multi-endpoint placements.
-- **Control plane protocol**: WebSocket vs HTTP/2 server push for config distribution. Does Pingora's async model change reconnection strategy?
-- **Graceful shutdown**: How Pingora's connection draining compares to Go's `Server.Shutdown` with in-flight request handling.
-- **Error handling**: Pingora's `Error` types vs Go's `error` interface. How circuit breaker failures propagate.
+A full Pingora implementation would address these mapping questions:
+
+- **Benchmarks**: Latency (p50, p99) and memory usage under load. Initial data suggests Pingora achieves lower tail latency at high concurrency due to async I/O, but Go's simplicity reduces development time.
+- **Peer selection**: Pingora's load balancing modules handle multi-endpoint placements natively. Single-endpoint placements (current design) bypass this complexity.
+- **Config protocol**: HTTP/2 server push could replace WebSocket for config distribution. Async runtime doesn't fundamentally change reconnection strategy—exponential backoff applies either way.
+- **Graceful shutdown**: Pingora's connection draining is explicit (`drain_connections()`). Go's `Server.Shutdown` handles in-flight requests automatically. Behavior is equivalent; API differs.
+- **Error propagation**: Pingora's typed errors (`Error` enum) vs Go's `error` interface. Circuit breaker state transitions map cleanly to either model.
