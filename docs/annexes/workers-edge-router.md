@@ -2,7 +2,7 @@
 
 ## Motivation
 
-The baseline router runs as a long-lived process (Docker container, VM, Kubernetes pod). Cell routing at the edge—using Cloudflare Workers or similar edge compute—changes foundational assumptions: no persistent connections, no local filesystem, millisecond CPU budgets, and different failure modes.
+The baseline router runs as a long-lived process (Docker container, VM, Kubernetes pod). Cell routing at the edge using Cloudflare Workers or similar edge compute changes foundational assumptions: no persistent connections, no local filesystem, millisecond CPU budgets, and different failure modes.
 
 This annex explores how the same two-level routing model (`routingKey → placement → endpoint`) applies in an edge environment, what constraints differ, and where the architecture must adapt.
 
@@ -36,12 +36,12 @@ Baseline router atomically swaps config on WebSocket push. Workers fetch config 
 
 **KV unavailability**: If Workers can't read KV, routing breaks unless fallback config is hardcoded in Worker script. Baseline router keeps last-known-good config in memory.
 
-**Upstream unreachable**: Same as baseline—return 502 or route to fallback.
+**Upstream unreachable**: Same as baseline. Return 502 or route to fallback.
 
 ## Future Exploration
 
 Edge routing at Workers scale introduces constraints not present in traditional proxies:
 
 - **Config caching**: Cache config in global scope (persists across requests in same isolate), revalidate on version mismatch or TTL expiry. Typical: 60s TTL with async refresh.
-- **Cold start impact**: Cold starts add 5–50ms. For cell routing, this is acceptable—routing decisions are fast once initialized. Pre-warming via scheduled triggers mitigates impact for latency-sensitive paths.
+- **Cold start impact**: Cold starts add 5-50ms. For cell routing, this is acceptable because routing decisions are fast once initialized. Pre-warming via scheduled triggers mitigates impact for latency-sensitive paths.
 - **Multi-region awareness**: Workers execute globally, but cells may be region-specific. Routing decisions should incorporate region hints (Cloudflare's `cf.colo`) to prefer nearby cells.

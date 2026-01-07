@@ -23,15 +23,14 @@ flowchart LR
     Router -->|default| T3
 ```
 
-A working implementation of cell-based ingress routing that demonstrates control plane / data plane separation from first principles. This repository explores how production edge systems maintain local routing decisions while distributing centralized configuration and why that architectural pattern matters for reliability at scale.
+A working implementation of cell-based ingress routing. Control plane pushes config; data plane routes requests locally. This is how production edge systems (Envoy, CDN nodes, service meshes) stay available when their control plane goes down.
 
 ## What This Repository Contains
 
 **A progression of four milestones** that build a functional ingress router with control plane distribution, health-aware routing, circuit breaking, and overload protection. Each milestone preserves core invariants (local routing decisions, atomic config updates, graceful degradation) while adding operational capability.
 
-**A collection of design annexes** that examine architectural questions beyond the core implementation: request processing pipelines, caching placement, rate limiting strategies, authentication boundaries, shuffle sharding, and runtime mappings (Pingora, Cloudflare Workers). These are comparative explorations, not feature proposals.
+**A collection of design annexes** covering request processing pipelines, caching, rate limiting, authentication, shuffle sharding, and runtime mappings (Pingora, Cloudflare Workers). These explore alternatives and tradeoffs, not features to implement.
 
-This is an architectural case study with working code. It demonstrates patterns from production edge systems (Envoy xDS, service mesh control planes, CDN edge nodes) in isolation, with explicit tradeoff documentation.
 
 ## How to Read This Repository
 
@@ -42,7 +41,7 @@ Start with [Milestone 1](docs/milestones/milestone-1.md) and progress through M4
 Read [Milestone 3](docs/milestones/milestone-3.md) and review the `internal/controlplane/` and `internal/dataplane/` implementations. The WebSocket protocol and reconnection logic demonstrate asynchronous config distribution.
 
 **If you want to explore design tradeoffs:**
-Read the [Design Annexes](docs/annexes/README.md). These generalize the lessons from the implementation and compare alternative approaches. Start with "Request Processing Pipelines" and "Caching and CDN" for foundational concepts.
+Read the [Design Annexes](docs/annexes/README.md). Start with "Request Processing Pipelines" and "Caching and CDN".
 
 **If you want to run it locally:**
 See the Quick Start section below. Docker Compose brings up the full system (control plane + router + demo cells) in one command.
@@ -95,8 +94,6 @@ This progression demonstrates how ingress routers evolve from static configurati
 Each milestone is independently runnable and includes failure mode analysis.
 
 ## Design Annexes
-
-These documents explore architectural questions beyond the core implementation. They are comparative and exploratory examining design spaces, tradeoffs, and alternative approaches.
 
 ### Fundamentals
 

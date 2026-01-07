@@ -2,7 +2,7 @@
 
 ## Architectural Intent
 
-Introduce configuration mutability while preserving the invariant that routing decisions use only local state. Routing tables become hot-reloadable from a file, but updates must be atomic—concurrent requests never observe partial configuration changes. Invalid configs must be rejected without disrupting ongoing request processing.
+Introduce configuration mutability while preserving the invariant that routing decisions use only local state. Routing tables become hot-reloadable from a file, but updates must be atomic: concurrent requests never observe partial configuration changes. Invalid configs must be rejected without disrupting ongoing request processing.
 
 This milestone demonstrates the pattern: **last-known-good config is more valuable than newest config**. If a new config fails validation, the router continues serving with the previous valid config.
 

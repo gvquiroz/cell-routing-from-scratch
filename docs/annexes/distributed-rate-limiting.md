@@ -60,15 +60,15 @@ All routers share rate limit state via external service (Redis, dedicated rate l
 
 ## Why Excluded from Core Router
 
-The baseline router's invariant is **stateless local decisions**. Adding distributed rate limiting breaks this—routers now depend on external state for correctness. Even local rate limiting complicates config (per-key limits in routing table?) and observability (how to debug rate limit rejections across fleet?).
+The baseline router's invariant is **stateless local decisions**. Adding distributed rate limiting breaks this because routers now depend on external state for correctness. Even local rate limiting complicates config (per-key limits in routing table?) and observability (how to debug rate limit rejections across fleet?).
 
 Milestone 4 adds **concurrency limits** because they preserve local state: semaphore-based slot acquisition, per-router enforcement, no coordination. Rate limiting requires either distributed state or sticky routing, both of which change architectural assumptions.
 
 ## Future Exploration
 
-The following design questions are intentionally left open—they represent meaningful tradeoffs rather than unfinished work:
+The following design questions are intentionally left open. They represent meaningful tradeoffs rather than unfinished work:
 
 - **Hybrid enforcement**: Local rate limiting with periodic sync to Redis. What sync interval balances fairness and latency? (Typical: 100ms–1s sync windows with local token buckets.)
 - **Limit granularity**: Should rate limits apply per `routingKey` (tenant), per `placementKey` (cell), or both? Nested limits add complexity but enable finer control.
 - **Graceful degradation**: When distributed state is unavailable, falling back to local limits risks thundering herd on recovery. Consider: gradual ramp-up, staggered reconnection.
-- **Config schema**: Expressing per-key limits—inline in `routingTable` vs separate `rateLimits` object. The latter scales better for large tenant counts.
+- **Config schema**: Expressing per-key limits (inline in `routingTable` vs separate `rateLimits` object). The latter scales better for large tenant counts.

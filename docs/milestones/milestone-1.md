@@ -2,7 +2,7 @@
 
 ## Architectural Intent
 
-Establish the baseline: routing decisions use only local, in-memory state. Demonstrate that cell-based routing is conceptually straightforward—a two-level map lookup with a default fallback—but requires careful handling of streaming proxies, connection pooling, and decision-making.
+Establish the baseline: routing decisions use only local, in-memory state. Demonstrate that cell-based routing is conceptually straightforward (a two-level map lookup with a default fallback) but requires careful handling of streaming proxies, connection pooling, and decision-making.
 
 ## Core Design
 
@@ -24,7 +24,7 @@ Unknown routing keys default to "tier3" (catch-all shared tier). Missing routing
 
 This milestone establishes the foundational invariants that hold across all future milestones. See [Architectural Invariants](../../README.md#architectural-invariants) for the full explanation.
 
-- **Local decisions only**: No RPC during routing—tables are immutable after init
+- **Local decisions only**: No RPC during routing; tables are immutable after init
 - **Streaming proxy**: Bodies streamed via `io.Copy`, not buffered
 - **Connection pooling**: Configured timeouts (5s dial, 30s request, 90s idle)
 

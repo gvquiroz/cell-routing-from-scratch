@@ -2,7 +2,7 @@
 
 ## Architectural Intent
 
-Separate config source from config application. Introduce a control plane as the authoritative source of routing configuration; data plane routers receive updates asynchronously via WebSocket. The critical invariant: **data plane survives control plane failure indefinitely**—routing continues with last-known-good config.
+Separate config source from config application. Introduce a control plane as the authoritative source of routing configuration; data plane routers receive updates asynchronously via WebSocket. The critical invariant: **data plane survives control plane failure indefinitely**, routing continues with last-known-good config.
 
 This milestone demonstrates the pattern used in production edge systems: centralized orchestration with local autonomy. The control plane coordinates fleet-wide config, but individual routers operate independently. Control plane unavailability affects config propagation, not request serving.
 

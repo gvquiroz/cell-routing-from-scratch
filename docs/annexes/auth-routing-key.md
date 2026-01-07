@@ -14,7 +14,7 @@ Authentication validates identity and authorization. Routing uses that validated
 Request → [TLS Termination] → [Authentication] → [Authorization] → [Routing] → [Proxy to Cell]
 ```
 
-**Trust boundary**: Everything after authentication trusts that the identity is valid. If authentication is bypassed (misconfiguration, bug), routing decisions become meaningless—unauthorized requests route to cells.
+**Trust boundary**: Everything after authentication trusts that the identity is valid. If authentication is bypassed (misconfiguration, bug), routing decisions become meaningless and unauthorized requests route to cells.
 
 ### Where Authentication Sits
 

@@ -1,6 +1,6 @@
 # Architecture
 
-> **Quick Reference** — This document is a concise cheat sheet. For detailed explanations, tradeoff reasoning, and failure mode analysis, see the [README](README.md) and [milestone docs](docs/milestones/).
+> **Quick Reference**: This document is a concise cheat sheet. For detailed explanations, tradeoff reasoning, and failure mode analysis, see the [README](README.md) and [milestone docs](docs/milestones/).
 
 ## Invariants
 
@@ -116,7 +116,7 @@ customer-789 → dedicated-cell-1 → http://dedicated-cell:8080
 
 **Circuit breakers**: Per-endpoint state machine (closed → open → half-open). Opens after N consecutive failures, stays open for timeout period, tests recovery in half-open state.
 
-**Concurrency limits**: Semaphore-based per-placement limits. Early rejection (429) prevents router saturation. No distributed coordination—each router enforces limits independently.
+**Concurrency limits**: Semaphore-based per-placement limits. Early rejection (429) prevents router saturation. No distributed coordination; each router enforces limits independently.
 
 ## Explicit Non-Goals
 

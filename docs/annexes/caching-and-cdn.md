@@ -14,14 +14,14 @@ Cache lookup can occur at multiple pipeline positions. Each placement has differ
 
 Pipeline: `Request → Cache Lookup → [miss] → WAF → Auth → Routing → Cell → Upstream`
 
-Cache sits at the global edge, before routing decisions. Cache key is derived from request path, query parameters, and select headers—no routing key or cell identity.
+Cache sits at the global edge, before routing decisions. Cache key is derived from request path, query parameters, and select headers. No routing key or cell identity.
 
 **Characteristics**:
 - Highest cache hit ratio (all tenants share cache space for public assets)
 - Cache misses traverse full pipeline (WAF, auth, routing, cell selection)
 - Purge targets all edge nodes (global invalidation)
 
-**Failure semantics**: Cache remains available during cell failures. Stale content can be served even if all cells for a tenant are unhealthy. This violates the cell-isolation invariant—cache becomes a shared fate system.
+**Failure semantics**: Cache remains available during cell failures. Stale content can be served even if all cells for a tenant are unhealthy. This violates the cell-isolation invariant because cache becomes a shared fate system.
 
 **Use case**: Public CDN assets (JavaScript bundles, images, fonts). Low cache key cardinality. Invalidation is rare or versioned (asset hashing).
 
@@ -29,7 +29,7 @@ Cache sits at the global edge, before routing decisions. Cache key is derived fr
 
 Pipeline: `Request → WAF → Auth → Routing → [Cell A Cache] → [miss] → Upstream`
 
-Cache sits within each cell, after routing decisions. Cache key includes routing key or placement key—cache is scoped to the cell.
+Cache sits within each cell, after routing decisions. Cache key includes routing key or placement key, so cache is scoped to the cell.
 
 **Characteristics**:
 - Lower hit ratio (cache partitioned per cell)
@@ -53,7 +53,7 @@ Two cache layers: global edge (high hit ratio, public assets) and per-cell or pe
 - Purge requires two-tier coordination (edge + shield invalidation)
 - Complexity: cache key design must be consistent across tiers
 
-**Failure semantics**: Edge cache available during shield or origin failures (serves stale public assets). Shield cache fails with the cell or region. Hybrid isolation—public content has shared fate, private content respects cell boundaries.
+**Failure semantics**: Edge cache available during shield or origin failures (serves stale public assets). Shield cache fails with the cell or region. Hybrid isolation: public content has shared fate, private content respects cell boundaries.
 
 **Use case**: Mixed workloads (public assets + private APIs).
 
@@ -65,7 +65,7 @@ High cardinality cache keys (many unique combinations) reduce hit ratio but impr
 - **Low cardinality**: High hit ratio, risk of over-caching (serving stale or wrong content)
 - **High cardinality**: Low hit ratio, safer (each tenant/user has independent cache entries)
 
-Multi-tenant systems should bias toward high cardinality—correctness over hit ratio. Purge is simpler when cache is partitioned by tenant (invalidate all entries for `X-Tenant-ID: alice`).
+Multi-tenant systems should bias toward high cardinality (correctness over hit ratio). Purge is simpler when cache is partitioned by tenant (invalidate all entries for `X-Tenant-ID: alice`).
 
 ## Invalidation and Change Management
 
@@ -77,7 +77,7 @@ Immutable assets with version identifiers in URLs:
 - `/assets/bundle-abc123.js` (content hash)
 - `/v2/api/resource` (API version)
 
-Cache these indefinitely (long TTL). No purge required—new versions have new URLs, old versions expire naturally. This is the preferred strategy for public assets.
+Cache these indefinitely (long TTL). No purge required because new versions have new URLs and old versions expire naturally. This is the preferred strategy for public assets.
 
 **Tradeoff**: Requires client-side version coordination (HTML must reference correct bundle hash). Not applicable to APIs where URL is fixed.
 
